@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "commandblockeditor",
+  "version": "${version}",
+  "name": "CommandBlockEditor",
+  "description": "",
+  "authors": [],
+  "contact": {},
+  "license": "All-Rights-Reserved",
+  "environment": "*",
+  "entrypoints": {
+    "client": [
+      "com.commandblockeditor.client.CommandblockeditorClient"
+    ],
+    "main": [
+      "com.commandblockeditor.Commandblockeditor"
+    ]
+  },
+  "mixins": [
+    "commandblockeditor.mixins.json",
+    {
+      "config": "commandblockeditor.client.mixins.json",
+      "environment": "client"
+    }
+  ],
+  "depends": {
+    "fabricloader": ">=${loader_version}",
+    "fabric-api": "*",
+    "minecraft": "${minecraft_version}"
+  }
+}
