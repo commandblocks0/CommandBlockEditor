@@ -1,4 +1,4 @@
-package com.commandblockeditor.client;
+package com.commandblockeditor.client.ui;
 
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;

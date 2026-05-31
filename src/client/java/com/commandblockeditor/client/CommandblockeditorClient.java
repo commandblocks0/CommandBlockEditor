@@ -1,5 +1,6 @@
 package com.commandblockeditor.client;
 
+import com.commandblockeditor.client.ui.EditorScreen;
 import com.commandblockeditor.network.OpenEditorPayload;
 import com.commandblockeditor.network.RequestEditorPayload;
 import net.fabricmc.api.ClientModInitializer;

@@ -1,4 +1,4 @@
-package com.commandblockeditor.client;
+package com.commandblockeditor.client.ui;
 
 import com.commandblockeditor.network.RequestEditorPayload;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
