@@ -12,6 +12,7 @@ public final class CommandParser {
     private static final Pattern REPEAT_PATTERN = Pattern.compile("\\d+");
     private static final Pattern EXPRESSION_PATTERN = Pattern.compile("`([^`]+)`");
     private static final Pattern VALID_EXPRESSION_PATTERN = Pattern.compile("[0-9i+\\-*/()\\s.]+");
+    private static final Pattern PREFIX_PATTERN = Pattern.compile("^([!?@\\d\\s]*):(.*)$");
 
     private CommandParser() {
     }
@@ -22,24 +23,30 @@ public final class CommandParser {
 
         for (int index = 0; index < expandedLines.size(); index++) {
             String line = expandedLines.get(index);
-            String[] tokens = line.split(":", -1);
-            String command = tokens.length > 1
-                    ? joinFrom(tokens, 1, ":").trim()
-                    : tokens[0].trim();
+
+            Matcher matcher = PREFIX_PATTERN.matcher(line);
+
+            String prefix = "";
+            String command = line.trim();
+
+            if (matcher.matches()) {
+                prefix = matcher.group(1);
+                command = matcher.group(2).trim();
+            }
 
             String type = index == 0 ? "impulse" : "chain";
             boolean conditional = false;
             boolean auto = index != 0;
 
-            if (tokens[0].contains("!") && index == 0) {
+            if (prefix.contains("!") && index == 0) {
                 type = "repeating";
             }
 
-            if (tokens[0].contains("?")) {
+            if (prefix.contains("?")) {
                 conditional = true;
             }
 
-            if (tokens[0].contains("@")) {
+            if (prefix.contains("@")) {
                 auto = index == 0;
             }
 
@@ -56,7 +63,13 @@ public final class CommandParser {
         for (ParsedCommand command : commands) {
             List<Double> numbers = getNumbers(command.command());
 
-            if (current == null || !normalize(command.command()).equals(normalize(current.command.command()))) {
+            if (
+                    current == null ||
+                    !normalize(command.command()).equals(normalize(current.command.command())) ||
+                    !command.type().equals(current.command.type()) ||
+                    command.auto() != current.command.auto() ||
+                    command.conditional() != current.command.conditional()
+            ) {
                 current = new Group(command, numbers);
                 groups.add(current);
                 continue;
@@ -126,8 +139,15 @@ public final class CommandParser {
         List<String> lines = new ArrayList<>();
 
         for (String line : editor) {
-            String[] split = line.split(":", -1);
-            int repeat = getRepeat(split[0]);
+            Matcher matcher = PREFIX_PATTERN.matcher(line);
+
+            if (!matcher.matches()) {
+                lines.add(line);
+                continue;
+            }
+
+            String prefix = matcher.group(1);
+            int repeat = getRepeat(prefix);
 
             for (int i = 0; i < repeat; i++) {
                 lines.add(replaceExpressions(line, i));
@@ -151,14 +171,12 @@ public final class CommandParser {
 
         while (matcher.find()) {
             String expression = matcher.group(1);
-            String replacement = "";
+            String replacement = "`" + expression + "`";
 
             if (VALID_EXPRESSION_PATTERN.matcher(expression).matches()) {
                 try {
                     replacement = formatNumber(clean(new ExpressionParser(expression, iteration).parse()));
-                } catch (IllegalArgumentException ignored) {
-                    replacement = "";
-                }
+                } catch (IllegalArgumentException ignored) {}
             }
 
             matcher.appendReplacement(result, Matcher.quoteReplacement(replacement));
