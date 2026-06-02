@@ -39,8 +39,18 @@ public final class CommandBlockChainService {
         BlockPos current = rootPos;
         Direction facing = getFacing(world, rootPos);
 
-        while (isCommandBlock(world.getBlockState(current))) {
+        while (true) {
             BlockState state = world.getBlockState(current);
+
+            if (!isCommandBlock(state)) {
+                break;
+            }
+
+            if (!current.equals(rootPos)
+                    && !state.isOf(Blocks.CHAIN_COMMAND_BLOCK)) {
+                break;
+            }
+
             BlockEntity blockEntity = world.getBlockEntity(current);
             if (!(blockEntity instanceof CommandBlockBlockEntity commandBlockEntity)) {
                 break;
@@ -87,7 +97,7 @@ public final class CommandBlockChainService {
     private static void clearOldTail(ServerWorld world, BlockPos startPos, Direction facing) {
         BlockPos current = startPos;
 
-        while (isCommandBlock(world.getBlockState(current))) {
+        while (current.equals(startPos) || world.getBlockState(current).isOf(Blocks.CHAIN_COMMAND_BLOCK)) {
             world.setBlockState(current, Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
             current = current.offset(facing);
         }

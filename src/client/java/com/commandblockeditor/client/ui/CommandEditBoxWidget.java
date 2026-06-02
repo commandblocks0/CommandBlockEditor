@@ -1,6 +1,5 @@
 package com.commandblockeditor.client.ui;
 
-import java.util.Objects;
 import java.util.function.Consumer;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
@@ -17,7 +16,6 @@ import net.minecraft.util.Util;
 
 @Environment(EnvType.CLIENT)
 public class CommandEditBoxWidget extends ScrollableWidget {
-    private static final int CURSOR_BLINK_INTERVAL = 300;
     private static final int GUTTER_PADDING = 4;
     private static final int SCROLLBAR_SIZE = 6;
     private final TextRenderer textRenderer;

@@ -1,126 +1,106 @@
 package com.commandblockeditor.client.ui;
 
 import com.commandblockeditor.network.SaveEditorPayload;
+import io.wispforest.owo.ui.base.BaseOwoScreen;
+import io.wispforest.owo.ui.component.Components;
+import io.wispforest.owo.ui.container.Containers;
+import io.wispforest.owo.ui.container.FlowLayout;
+import io.wispforest.owo.ui.core.*;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
-import net.minecraft.client.gui.DrawContext;
-import net.minecraft.client.gui.screen.Screen;
-import net.minecraft.client.gui.widget.ButtonWidget;
 import net.minecraft.text.Text;
 import net.minecraft.util.math.BlockPos;
 
-public class EditorScreen extends Screen {
-    private static final int EDITOR_TOP_MARGIN = 34;
-    private static final int EDITOR_SIDE_MARGIN = 12;
-    private static final int MAX_EDITOR_WIDTH = 860;
-    private static final int MAX_EDITOR_HEIGHT = 420;
-    private static final int BUTTON_WIDTH = 90;
-    private static final int BUTTON_HEIGHT = 20;
-    private static final int BUTTON_GAP = 8;
+public class EditorScreen extends BaseOwoScreen<FlowLayout> {
 
     private final BlockPos rootPos;
     private final String initialText;
-    private CommandEditBoxWidget editor;
+    private EditorComponent editor;
 
     public EditorScreen(BlockPos rootPos, String initialText) {
-        super(Text.literal("Command Block Editor"));
         this.rootPos = rootPos;
         this.initialText = initialText;
     }
 
     @Override
     protected void init() {
-        int totalEditorWidth = getEditorTotalWidth();
-        int editorHeight = getEditorHeight();
-        int editorX = getEditorX();
-        int editorY = EDITOR_TOP_MARGIN;
+        super.init();
 
-        this.editor = new CommandEditBoxWidget(
-                this.textRenderer,
-                editorX,
-                editorY,
-                totalEditorWidth,
-                editorHeight,
-                Text.literal("Command text"),
-                Text.literal("")
-        );
-        this.editor.setMaxLength(Integer.MAX_VALUE);
+        if (this.editor != null) {
+            this.editor.focusHandler().focus(this.editor, Component.FocusSource.MOUSE_CLICK);
+        }
+    }
+
+    @Override
+    protected OwoUIAdapter<FlowLayout> createAdapter() {
+        return OwoUIAdapter.create(this, Containers::verticalFlow);
+    }
+
+    @Override
+    protected void build(FlowLayout rootComponent) {
+        rootComponent.surface(Surface.blur(3, 5))
+                .verticalAlignment(VerticalAlignment.CENTER)
+                .horizontalAlignment(HorizontalAlignment.CENTER);
+
+        var mainPanel = Containers.verticalFlow(Sizing.fill(90), Sizing.fill(90));
+        mainPanel.surface(Surface.DARK_PANEL);
+        mainPanel.padding(Insets.of(10));
+        
+        mainPanel.child(Components.label(Text.literal("Command Block Editor"))
+                        .shadow(true)
+                        .margins(Insets.bottom(10))
+                        .horizontalSizing(Sizing.content()));
+
+        this.editor = new EditorComponent();
         this.editor.setText(this.initialText);
-        this.addDrawableChild(this.editor);
-        this.setInitialFocus(this.editor);
+        this.editor.horizontalSizing(Sizing.fill(100));
+        this.editor.verticalSizing(Sizing.fill(100));
+        
+        var editorContainer = Containers.verticalFlow(Sizing.fill(100), Sizing.expand());
+        editorContainer.surface(Surface.outline(0xFF404040));
+        editorContainer.padding(Insets.of(1));
+        editorContainer.child(this.editor);
 
-        int buttonY = editorY + editorHeight + 8;
-        int buttonStartX = (this.width - (BUTTON_WIDTH * 3) - BUTTON_GAP) / 2;
+        mainPanel.child(editorContainer);
 
-        this.addDrawableChild(ButtonWidget.builder(Text.literal("Save"), button -> {
-            ClientPlayNetworking.send(new SaveEditorPayload(
-                    this.rootPos,
-                    trimTrailingEmptyLines(this.editor.getText())
-            ));
+        var buttonRow = Containers.horizontalFlow(Sizing.fill(100), Sizing.content());
+        buttonRow.horizontalAlignment(HorizontalAlignment.CENTER)
+                .margins(Insets.top(10));
+
+        buttonRow.child(Components.button(Text.literal("Save"), button -> {
+            ClientPlayNetworking.send(new SaveEditorPayload(this.rootPos, trimTrailingEmptyLines(this.editor.getText())));
             this.close();
-        }).dimensions(buttonStartX, buttonY, BUTTON_WIDTH, BUTTON_HEIGHT).build());
+        }).sizing(Sizing.fixed(80), Sizing.fixed(20)));
 
-        this.addDrawableChild(ButtonWidget.builder(Text.literal("Cancel"), button -> this.close())
-                .dimensions(buttonStartX + BUTTON_WIDTH + BUTTON_GAP, buttonY, BUTTON_WIDTH, BUTTON_HEIGHT)
-                .build());
+        buttonRow.child(Components.button(Text.literal("Cancel"), button -> this.close())
+                .sizing(Sizing.fixed(80), Sizing.fixed(20))
+                .margins(Insets.left(8)));
 
-        this.addDrawableChild(ButtonWidget.builder(Text.literal("Help"), button -> {
-            ClientPlayNetworking.send(new SaveEditorPayload(
-                    this.rootPos,
-                    trimTrailingEmptyLines(this.editor.getText())
-            ));
-            assert client != null;
-            client.setScreen(new HelpScreen(this.rootPos));
-        }).dimensions(buttonStartX + (BUTTON_WIDTH + BUTTON_GAP) * 2, buttonY, BUTTON_WIDTH, BUTTON_HEIGHT).build());
+        buttonRow.child(Components.button(Text.literal("Help"), button -> {
+            ClientPlayNetworking.send(new SaveEditorPayload(this.rootPos, trimTrailingEmptyLines(this.editor.getText())));
+            if (this.client != null) {
+                this.client.setScreen(new HelpScreen(this.rootPos));
+            }
+        }).sizing(Sizing.fixed(80), Sizing.fixed(20))
+                .margins(Insets.left(8)));
+
+        mainPanel.child(buttonRow);
+        rootComponent.child(mainPanel);
     }
 
     @Override
-    protected void setInitialFocus() {
-        if (this.editor != null) {
-            this.setInitialFocus(this.editor);
+    public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+        if (hasControlDown() && keyCode == 83) { //ctrl s
+            ClientPlayNetworking.send(
+                    new SaveEditorPayload(
+                            this.rootPos,
+                            trimTrailingEmptyLines(this.editor.getText())
+                    )
+            );
+            this.close();
+            return true;
         }
-    }
 
-    @Override
-    public void onDisplayed() {
-        if (this.editor != null) {
-            this.editor.setFocused(true);
-            this.setInitialFocus(this.editor);
-        }
-    }
-
-    @Override
-    public void render(DrawContext context, int mouseX, int mouseY, float delta) {
-        // Widget now handles its own background for precise scrollbar alignment
-        super.render(context, mouseX, mouseY, delta);
-
-        context.drawCenteredTextWithShadow(
-                this.textRenderer,
-                this.title,
-                this.width / 2,
-                12,
-                0xFFFFFF
-        );
-    }
-
-    @Override
-    public void renderBackground(DrawContext context, int mouseX, int mouseY, float delta) {
-    }
-
-    @Override
-    public boolean shouldPause() {
-        return false;
-    }
-
-    private int getEditorTotalWidth() {
-        return Math.min(this.width - (EDITOR_SIDE_MARGIN * 2), MAX_EDITOR_WIDTH);
-    }
-
-    private int getEditorHeight() {
-        return Math.min(this.height - EDITOR_TOP_MARGIN - BUTTON_HEIGHT - 28, MAX_EDITOR_HEIGHT);
-    }
-
-    private int getEditorX() {
-        return (this.width - getEditorTotalWidth()) / 2;
+        return super.keyPressed(keyCode, scanCode, modifiers);
     }
 
     private static String trimTrailingEmptyLines(String text) {

@@ -52,7 +52,7 @@ public class CommandblockeditorClient implements ClientModInitializer {
 
         ClientPlayNetworking.registerGlobalReceiver(OpenEditorPayload.ID, (payload, context) ->
                 context.client().execute(() ->
-                        context.client().setScreen(new EditorScreen(payload.rootPos(), payload.editorText()))
+                        context.client().setScreen(new EditorScreen(payload.rootPos(),payload.editorText()))
                 )
         );
     }

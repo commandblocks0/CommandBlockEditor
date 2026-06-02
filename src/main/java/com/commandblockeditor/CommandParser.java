@@ -59,15 +59,16 @@ public final class CommandParser {
     public static List<String> toEditor(List<ParsedCommand> commands) {
         List<Group> groups = new ArrayList<>();
         Group current = null;
-
         for (ParsedCommand command : commands) {
             List<Double> numbers = getNumbers(command.command());
 
+            boolean first = current != null
+                    && current.command.type.equals("impulse");
             if (
                     current == null ||
                     !normalize(command.command()).equals(normalize(current.command.command())) ||
-                    !command.type().equals(current.command.type()) ||
-                    command.auto() != current.command.auto() ||
+                    !command.type().equals(first ? "chain" : current.command.type()) ||
+                    command.auto() != (first || current.command.auto()) ||
                     command.conditional() != current.command.conditional()
             ) {
                 current = new Group(command, numbers);

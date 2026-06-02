@@ -4,6 +4,7 @@
   "package": "com.commandblockeditor.mixin.client",
   "compatibilityLevel": "JAVA_21",
   "client": [
+    "ChatInputSuggestorAccessor"
   ],
   "injectors": {
     "defaultRequire": 1
