@@ -15,24 +15,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 public final class CommandBlockChainService {
-    private CommandBlockChainService() {
-    }
-
-    public static BlockPos prepareRoot(ServerPlayerEntity player, BlockPos requestedPos) {
-        ServerWorld world = player.getServerWorld();
-
-        if (isCommandBlock(world.getBlockState(requestedPos))) {
-            return findRoot(world, requestedPos);
-        }
-
-        Direction facing = Direction.UP;
-        BlockState state = Blocks.COMMAND_BLOCK
-                .getDefaultState()
-                .with(CommandBlock.FACING, facing)
-                .with(CommandBlock.CONDITIONAL, false);
-        world.setBlockState(requestedPos, state, Block.NOTIFY_ALL);
-        return requestedPos;
-    }
+    private CommandBlockChainService() {}
 
     public static List<CommandParser.ParsedCommand> read(ServerWorld world, BlockPos rootPos) {
         List<CommandParser.ParsedCommand> commands = new ArrayList<>();
@@ -94,16 +77,7 @@ public final class CommandBlockChainService {
         clearOldTail(world, rootPos.offset(facing, commands.size()), facing);
     }
 
-    private static void clearOldTail(ServerWorld world, BlockPos startPos, Direction facing) {
-        BlockPos current = startPos;
-
-        while (current.equals(startPos) || world.getBlockState(current).isOf(Blocks.CHAIN_COMMAND_BLOCK)) {
-            world.setBlockState(current, Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
-            current = current.offset(facing);
-        }
-    }
-
-    private static BlockPos findRoot(ServerWorld world, BlockPos start) {
+    public static BlockPos findRoot(ServerWorld world, BlockPos start) {
         BlockPos current = start;
         Direction facing = getFacing(world, start);
 
@@ -117,12 +91,21 @@ public final class CommandBlockChainService {
         }
     }
 
+    private static void clearOldTail(ServerWorld world, BlockPos startPos, Direction facing) {
+        BlockPos current = startPos;
+
+        while (current.equals(startPos) || world.getBlockState(current).isOf(Blocks.CHAIN_COMMAND_BLOCK)) {
+            world.setBlockState(current, Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
+            current = current.offset(facing);
+        }
+    }
+
     private static Direction getFacing(ServerWorld world, BlockPos pos) {
         BlockState state = world.getBlockState(pos);
         if (isCommandBlock(state)) {
             return state.get(CommandBlock.FACING);
         }
-        return Direction.NORTH;
+        return Direction.UP;
     }
 
     private static boolean isCommandBlock(BlockState state) {

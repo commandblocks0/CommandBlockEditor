@@ -89,6 +89,12 @@ public class EditorScreen extends BaseOwoScreen<FlowLayout> {
 
     @Override
     public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+
+        if (editor != null &&
+                editor.onKeyPress(keyCode, scanCode, modifiers)) {
+            return true;
+        }
+
         if (hasControlDown() && keyCode == 83) { //ctrl s
             ClientPlayNetworking.send(
                     new SaveEditorPayload(

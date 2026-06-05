@@ -68,7 +68,7 @@ public final class CommandParser {
                     current == null ||
                     !normalize(command.command()).equals(normalize(current.command.command())) ||
                     !command.type().equals(first ? "chain" : current.command.type()) ||
-                    command.auto() != (first || current.command.auto()) ||
+                    (command.auto() == current.command.auto()) == first ||
                     command.conditional() != current.command.conditional()
             ) {
                 current = new Group(command, numbers);

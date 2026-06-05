@@ -1,13 +1,17 @@
 package com.commandblockeditor.client.ui;
 
-import com.commandblockeditor.mixin.client.ChatInputSuggestorAccessor;
+import com.commandblockeditor.client.mixin.ChatInputSuggestorAccessor;
 import com.mojang.brigadier.ParseResults;
+import com.mojang.brigadier.StringReader;
+import com.mojang.brigadier.suggestion.Suggestion;
+import com.mojang.brigadier.suggestion.Suggestions;
 import io.wispforest.owo.ui.base.BaseComponent;
 import io.wispforest.owo.ui.core.CursorStyle;
 import io.wispforest.owo.ui.core.OwoUIDrawContext;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.font.TextRenderer;
 import net.minecraft.client.gui.screen.Screen;
+import net.minecraft.client.input.CursorMovement;
 import net.minecraft.client.network.ClientPlayNetworkHandler;
 import net.minecraft.client.render.RenderLayer;
 import net.minecraft.command.CommandSource;
@@ -15,7 +19,10 @@ import net.minecraft.text.OrderedText;
 import net.minecraft.text.Text;
 import net.minecraft.util.Util;
 import net.minecraft.util.math.MathHelper;
+import org.jetbrains.annotations.NotNull;
+import org.lwjgl.glfw.GLFW;
 
+import java.util.List;
 import java.util.function.Consumer;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -41,6 +48,15 @@ public class EditorComponent extends BaseComponent {
     private Consumer<String> changeListener = (s) -> {};
     private int lastWidth = 0;
     private int lastHeight = 0;
+
+    private Suggestions suggestions;
+    private int selectedSuggestion = 0;
+    private int suggestionScroll = 0;
+    private int suggestionX;
+    private int suggestionY;
+    private boolean cyclingSuggestions = false;
+    private String cycleOriginalLineText = null;
+    private java.util.concurrent.CompletableFuture<Suggestions> pendingSuggestions;
 
     public EditorComponent() {
         this.textRenderer = MinecraftClient.getInstance().textRenderer;
@@ -143,8 +159,9 @@ public class EditorComponent extends BaseComponent {
             }
             lineIdx++;
         }
-        
+
         drawScrollbars(context);
+        drawSuggestions(context);
     }
 
     private static final Pattern EXPRESSION_PATTERN = Pattern.compile("`([^`]+)`");
@@ -281,6 +298,15 @@ public class EditorComponent extends BaseComponent {
         
         scrollY = Math.max(0, scrollY);
         scrollX = Math.max(0, scrollX);
+
+        suggestionX = this.x + gutterWidth + padding
+                + cursorXInLine
+                - (int) scrollX;
+
+        suggestionY = this.y + padding
+                + currentLineIdx * 9
+                - (int) scrollY
+                + 10;
         
         int totalHeight = this.editBox.getLineCount() * 9;
         int maxScrollY = Math.max(0, totalHeight - this.height + 8);
@@ -290,6 +316,10 @@ public class EditorComponent extends BaseComponent {
         int availableWidth = this.width - gutterWidth - 10;
         int maxScrollX = Math.max(0, maxWidth - availableWidth);
         if (scrollX > maxScrollX) scrollX = maxScrollX;
+
+        if (!cyclingSuggestions) {
+            updateSuggestions();
+        }
     }
 
     @Override
@@ -391,7 +421,41 @@ public class EditorComponent extends BaseComponent {
     @Override
     public boolean onKeyPress(int keyCode, int scanCode, int modifiers) {
         if (!this.focused) return false;
-        if (this.editBox.handleSpecialKey(keyCode)) return true;
+
+        if (suggestions != null && !suggestions.isEmpty()) {
+            if (keyCode == GLFW.GLFW_KEY_UP) {
+                selectedSuggestion = (selectedSuggestion - 1 + suggestions.getList().size()) % suggestions.getList().size();
+                cyclingSuggestions = false;
+                return true;
+            }
+            if (keyCode == GLFW.GLFW_KEY_DOWN) {
+                selectedSuggestion = (selectedSuggestion + 1) % suggestions.getList().size();
+                cyclingSuggestions = false;
+                return true;
+            }
+            if (keyCode == GLFW.GLFW_KEY_TAB) {
+                applySuggestion(Screen.hasShiftDown() ? -1 : 1);
+                return true;
+            }
+            if (keyCode == GLFW.GLFW_KEY_ENTER || keyCode == GLFW.GLFW_KEY_KP_ENTER) {
+                applySuggestion(0);
+                return true;
+            }
+            if (keyCode == GLFW.GLFW_KEY_ESCAPE) {
+                suggestions = null;
+                cyclingSuggestions = false;
+                return true;
+            }
+        } else if (keyCode == GLFW.GLFW_KEY_TAB) {
+            updateSuggestions();
+            return true;
+        }
+
+        if (this.editBox.handleSpecialKey(keyCode)) {
+            cyclingSuggestions = false;
+            return true;
+        }
+
         return super.onKeyPress(keyCode, scanCode, modifiers);
     }
 
@@ -399,6 +463,7 @@ public class EditorComponent extends BaseComponent {
     public boolean onCharTyped(char chr, int modifiers) {
         if (!this.focused) return false;
         if (net.minecraft.util.StringHelper.isValidChar(chr)) {
+            cyclingSuggestions = false;
             this.editBox.replaceSelection(Character.toString(chr));
             return true;
         }
@@ -414,6 +479,8 @@ public class EditorComponent extends BaseComponent {
     @Override
     public void onFocusLost() {
         this.focused = false;
+        this.suggestions = null;
+        this.cyclingSuggestions = false;
     }
 
     @Override
@@ -424,5 +491,214 @@ public class EditorComponent extends BaseComponent {
     @Override
     public CursorStyle cursorStyle() {
         return CursorStyle.TEXT;
+    }
+
+    public void drawSuggestions(OwoUIDrawContext context) {
+        if (suggestions == null || suggestions.isEmpty()) return;
+
+        List<Suggestion> list = suggestions.getList();
+        int count = list.size();
+        int maxVisible = 10;
+        int visibleCount = Math.min(maxVisible, count);
+
+        if (selectedSuggestion < 0) selectedSuggestion = 0;
+        if (selectedSuggestion >= count) selectedSuggestion = count - 1;
+
+        if (selectedSuggestion < suggestionScroll) {
+            suggestionScroll = selectedSuggestion;
+        } else if (selectedSuggestion >= suggestionScroll + maxVisible) {
+            suggestionScroll = selectedSuggestion - maxVisible + 1;
+        }
+
+        int rowHeight = 12;
+        int maxWidth = 150;
+        for (int i = 0; i < visibleCount; i++) {
+            maxWidth = Math.max(maxWidth, this.textRenderer.getWidth(list.get(suggestionScroll + i).getText()) + 10);
+        }
+
+        int x = suggestionX;
+        int y = suggestionY - (visibleCount * rowHeight) - 12;
+
+        if (x + maxWidth > this.x + this.width) {
+            x = this.x + this.width - maxWidth;
+        }
+        if (y < this.y) {
+            y = suggestionY;
+        }
+
+        context.getMatrices().push();
+        context.getMatrices().translate(0, 0, 500);
+
+        context.fill(x - 1, y - 1, x + maxWidth + 1, y + visibleCount * rowHeight + 1, 0xFF404040);
+        context.fill(x, y, x + maxWidth, y + visibleCount * rowHeight, 0xFF101010);
+
+        for (int i = 0; i < visibleCount; i++) {
+            int index = suggestionScroll + i;
+            Suggestion suggestion = list.get(index);
+            int itemY = y + i * rowHeight;
+
+            if (index == selectedSuggestion) {
+                context.fill(x, itemY, x + maxWidth, itemY + rowHeight, 0xFF404080);
+            }
+
+            context.drawText(this.textRenderer, Text.literal(suggestion.getText()), x + 5, itemY + 2, 0xFFFFFFFF, true);
+        }
+
+        context.getMatrices().pop();
+    }
+
+    private void updateSuggestions() {
+        if (cyclingSuggestions) return;
+
+        ClientPlayNetworkHandler networkHandler = MinecraftClient.getInstance().getNetworkHandler();
+        if (networkHandler == null) {
+            suggestions = null;
+            return;
+        }
+
+        int lineIndex = editBox.getCurrentLineIndex();
+        if (lineIndex < 0) {
+            suggestions = null;
+            return;
+        }
+
+        CommandEditBox.Substring line = editBox.getLine(lineIndex);
+        String lineText = editBox.getText().substring(line.beginIndex(), line.endIndex());
+        int cursorInLine = editBox.getCursor() - line.beginIndex();
+
+        int commandStart = getCommandStartInLine(lineText);
+        String commandPart = lineText.substring(commandStart);
+        cursorInLine = Math.max(0, cursorInLine - commandStart);
+
+        String toParse = commandPart;
+        Matcher backtickMatcher = EXPRESSION_PATTERN.matcher(toParse);
+        StringBuilder sb = new StringBuilder();
+        int last = 0;
+
+        while (backtickMatcher.find()) {
+            sb.append(toParse, last, backtickMatcher.start());
+            sb.append("0".repeat(backtickMatcher.end() - backtickMatcher.start()));
+            last = backtickMatcher.end();
+        }
+
+        sb.append(toParse.substring(last));
+        toParse = sb.toString();
+
+        StringReader reader = new StringReader(toParse);
+
+        ParseResults<CommandSource> parse = networkHandler.getCommandDispatcher().parse(reader, networkHandler.getCommandSource());
+
+        if (pendingSuggestions != null) {
+            pendingSuggestions.cancel(true);
+        }
+
+        pendingSuggestions = networkHandler.getCommandDispatcher().getCompletionSuggestions(parse, cursorInLine);
+        pendingSuggestions.thenAccept(result -> {
+            MinecraftClient.getInstance().execute(() -> {
+                suggestions = result;
+                selectedSuggestion = 0;
+                suggestionScroll = 0;
+            });
+        });
+    }
+
+    private static @NotNull StringReader getReader(String commandPart) {
+        String toParse = commandPart;
+        Matcher backtickMatcher = EXPRESSION_PATTERN.matcher(toParse);
+        StringBuilder sb = new StringBuilder();
+        int last = 0;
+
+        while (backtickMatcher.find()) {
+            sb.append(toParse, last, backtickMatcher.start());
+            sb.append("0".repeat(backtickMatcher.end() - backtickMatcher.start()));
+            last = backtickMatcher.end();
+        }
+
+        sb.append(toParse.substring(last));
+        toParse = sb.toString();
+
+        StringReader reader = new StringReader(toParse);
+        return reader;
+    }
+
+    private static @NotNull StringReader getStringReader(String commandPart) {
+        String toParse = commandPart;
+        Matcher backtickMatcher = EXPRESSION_PATTERN.matcher(toParse);
+        StringBuilder sb = new StringBuilder();
+        int last = 0;
+
+        while (backtickMatcher.find()) {
+            sb.append(toParse, last, backtickMatcher.start());
+            sb.append("0".repeat(backtickMatcher.end() - backtickMatcher.start()));
+            last = backtickMatcher.end();
+        }
+
+        sb.append(toParse.substring(last));
+        toParse = sb.toString();
+
+        StringReader reader = new StringReader(toParse);
+        if (reader.canRead() && reader.peek() == '/') {
+            reader.skip();
+        }
+        return reader;
+    }
+
+    private void applySuggestion(int offset) {
+        if (suggestions == null || suggestions.isEmpty()) return;
+
+        boolean wasCycling = cyclingSuggestions;
+        if (!cyclingSuggestions) {
+            cyclingSuggestions = true;
+            int lineIdx = editBox.getCurrentLineIndex();
+            CommandEditBox.Substring line = editBox.getLine(lineIdx);
+            cycleOriginalLineText = editBox.getText().substring(line.beginIndex(), line.endIndex());
+        }
+
+        if (offset != 0) {
+            if (wasCycling || offset < 0) {
+                selectedSuggestion = (selectedSuggestion + offset + suggestions.getList().size()) % suggestions.getList().size();
+            }
+        }
+
+        Suggestion suggestion = suggestions.getList().get(selectedSuggestion);
+        int commandStart = getCommandStartInLine(cycleOriginalLineText);
+        String commandPart = cycleOriginalLineText.substring(commandStart);
+        String replacedCommand = suggestion.apply(commandPart);
+        String newLine = cycleOriginalLineText.substring(0, commandStart) + replacedCommand;
+
+        int lineIdx = editBox.getCurrentLineIndex();
+        CommandEditBox.Substring currentLine = editBox.getLine(lineIdx);
+
+        int oldCursorInLine = editBox.getCursor() - currentLine.beginIndex();
+
+        editBox.setSelecting(false);
+        editBox.moveCursor(CursorMovement.ABSOLUTE, currentLine.beginIndex());
+        editBox.setSelecting(true);
+        editBox.moveCursor(CursorMovement.ABSOLUTE, currentLine.endIndex());
+        editBox.replaceSelection(newLine);
+
+        editBox.setSelecting(false);
+
+        int delta = newLine.length() - cycleOriginalLineText.length();
+        int newCursor = currentLine.beginIndex() + oldCursorInLine + delta;
+
+        editBox.moveCursor(CursorMovement.ABSOLUTE, newCursor);
+
+        if (offset == 0) {
+            suggestions = null;
+            cyclingSuggestions = false;
+        }
+    }
+
+    private int getCommandStartInLine(String lineText) {
+        Matcher prefixMatcher = PREFIX_PATTERN.matcher(lineText);
+        int start = 0;
+        if (prefixMatcher.find()) {
+            start = prefixMatcher.end();
+        }
+        while (start < lineText.length() && Character.isWhitespace(lineText.charAt(start))) {
+            start++;
+        }
+        return start;
     }
 }

@@ -27,10 +27,7 @@ public class Commandblockeditor
                         return;
                     }
 
-                    var rootPos = CommandBlockChainService.prepareRoot(
-                            context.player(),
-                            payload.pos()
-                    );
+                    var rootPos = CommandBlockChainService.findRoot(context.player().getServerWorld(), payload.pos());
                     List<String> editorLines = CommandParser.toEditor(
                             CommandBlockChainService.read(context.player().getServerWorld(), rootPos)
                     );
