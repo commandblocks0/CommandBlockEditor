@@ -44,6 +44,8 @@ public class EditorComponent extends BaseComponent {
     private boolean draggingHorizontal = false;
     private double dragScrollStart = 0;
     private double dragPosStart = 0;
+    private double mouseX = 0;
+    private double mouseY = 0;
     
     private Consumer<String> changeListener = (s) -> {};
     private int lastWidth = 0;
@@ -80,6 +82,8 @@ public class EditorComponent extends BaseComponent {
 
     @Override
     public void draw(OwoUIDrawContext context, int mouseX, int mouseY, float partialTicks, float delta) {
+        this.mouseX = mouseX - this.x;
+        this.mouseY = mouseY - this.y;
         if (this.width != lastWidth || this.height != lastHeight) {
             this.lastWidth = this.width;
             this.lastHeight = this.height;
@@ -324,6 +328,31 @@ public class EditorComponent extends BaseComponent {
 
     @Override
     public boolean onMouseDown(double mouseX, double mouseY, int button) {
+        this.mouseX = mouseX;
+        this.mouseY = mouseY;
+        if (button == 0 && suggestions != null && !suggestions.isEmpty()) {
+            if (isHoveringSuggestions(mouseX, mouseY)) {
+                List<Suggestion> list = suggestions.getList();
+                int maxVisible = 10;
+                int visibleCount = Math.min(maxVisible, list.size());
+                int rowHeight = 12;
+
+                int sy = suggestionY - this.y - (visibleCount * rowHeight) - 12;
+                if (sy < 0) {
+                    sy = suggestionY - this.y;
+                }
+
+                int clicked = (int)((mouseY - sy) / rowHeight);
+                int index = suggestionScroll + clicked;
+
+                if (index >= 0 && index < list.size()) {
+                    selectedSuggestion = index;
+                    applySuggestion(0);
+                    return true;
+                }
+            }
+        }
+
         if (button == 0) {
             int gutterWidth = getGutterWidth();
             
@@ -358,6 +387,8 @@ public class EditorComponent extends BaseComponent {
 
     @Override
     public boolean onMouseDrag(double mouseX, double mouseY, double deltaX, double deltaY, int button) {
+        this.mouseX = mouseX;
+        this.mouseY = mouseY;
         if (button == 0) {
             if (draggingVertical) {
                 int totalHeight = this.editBox.getLineCount() * 9 + 8;
@@ -396,6 +427,8 @@ public class EditorComponent extends BaseComponent {
 
     @Override
     public boolean onMouseUp(double mouseX, double mouseY, int button) {
+        this.mouseX = mouseX;
+        this.mouseY = mouseY;
         draggingVertical = false;
         draggingHorizontal = false;
         return super.onMouseUp(mouseX, mouseY, button);
@@ -403,6 +436,8 @@ public class EditorComponent extends BaseComponent {
 
     @Override
     public boolean onMouseScroll(double mouseX, double mouseY, double amount) {
+        this.mouseX = mouseX;
+        this.mouseY = mouseY;
         if (Screen.hasShiftDown()) {
             scrollX = Math.max(0, scrollX - amount * 15);
             int maxWidth = this.editBox.getMaxLineWidth();
@@ -490,7 +525,64 @@ public class EditorComponent extends BaseComponent {
 
     @Override
     public CursorStyle cursorStyle() {
+        if (isHoveringSuggestions(this.mouseX, this.mouseY) || isHoveringScrollbars(this.mouseX, this.mouseY)) {
+            return CursorStyle.HAND;
+        }
         return CursorStyle.TEXT;
+    }
+
+    private boolean isHoveringSuggestions(double mouseX, double mouseY) {
+        if (suggestions == null || suggestions.isEmpty()) return false;
+
+        List<Suggestion> list = suggestions.getList();
+        int maxVisible = 10;
+        int visibleCount = Math.min(maxVisible, list.size());
+        int rowHeight = 12;
+
+        int maxWidth = 150;
+        for (int i = 0; i < visibleCount; i++) {
+            maxWidth = Math.max(
+                    maxWidth,
+                    this.textRenderer.getWidth(list.get(suggestionScroll + i).getText()) + 10
+            );
+        }
+
+        int sx = suggestionX - this.x;
+        int sy = suggestionY - this.y - (visibleCount * rowHeight) - 12;
+
+        if (sx + maxWidth > this.width) {
+            sx = this.width - maxWidth;
+        }
+        if (sy < 0) {
+            sy = suggestionY - this.y;
+        }
+
+        return mouseX >= sx && mouseX <= sx + maxWidth
+                && mouseY >= sy && mouseY <= sy + visibleCount * rowHeight;
+    }
+
+    private boolean isHoveringScrollbars(double mouseX, double mouseY) {
+        int scrollbarSize = 5;
+
+        // Vertical scrollbar check
+        int totalHeight = this.editBox.getLineCount() * 9;
+        if (totalHeight > this.height - 8) {
+            if (mouseX >= this.width - scrollbarSize && mouseX <= this.width && mouseY >= 0 && mouseY <= this.height) {
+                return true;
+            }
+        }
+
+        // Horizontal scrollbar check
+        int maxWidth = this.editBox.getMaxLineWidth();
+        int gutterWidth = getGutterWidth();
+        int availableWidth = this.width - gutterWidth - 10;
+        if (maxWidth > availableWidth) {
+            if (mouseY >= this.height - scrollbarSize && mouseY <= this.height && mouseX >= gutterWidth && mouseX <= this.width) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     public void drawSuggestions(OwoUIDrawContext context) {
