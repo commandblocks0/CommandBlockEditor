@@ -60,6 +60,10 @@ public class EditorComponent extends BaseComponent {
     private String cycleOriginalLineText = null;
     private java.util.concurrent.CompletableFuture<Suggestions> pendingSuggestions;
 
+    private static final int VERTICAL_OVERSCROLL = 50;
+    private static final int HORIZONTAL_OVERSCROLL = 50;
+    private boolean initialScrollPositioned = false;
+
     public EditorComponent() {
         this.textRenderer = MinecraftClient.getInstance().textRenderer;
         this.editBox = new CommandEditBox(this.textRenderer, 100);
@@ -69,7 +73,7 @@ public class EditorComponent extends BaseComponent {
 
     public void setText(String text) {
         this.editBox.setText(text.replace("\r", ""));
-        this.onCursorChange();
+        this.initialScrollPositioned = false;
     }
 
     public String getText() {
@@ -87,6 +91,8 @@ public class EditorComponent extends BaseComponent {
         if (this.width != lastWidth || this.height != lastHeight) {
             this.lastWidth = this.width;
             this.lastHeight = this.height;
+            initialScrollPositioned = false;
+            scrollY = getMaxScrollY();
             this.onCursorChange();
         }
 
@@ -244,7 +250,9 @@ public class EditorComponent extends BaseComponent {
             context.fill(trackX, this.y, this.x + this.width, this.y + this.height, trackColor);
             
             int visibleHeight = this.height;
-            float scrollRatio = (float) scrollY / (totalHeight - visibleHeight + padding);
+            float scrollRatio = getMaxScrollY() <= 0
+                    ? 0
+                    : (float) scrollY / getMaxScrollY();
             int barHeight = Math.max(10, (int) ((float) visibleHeight * visibleHeight / (totalHeight + padding)));
             int barY = (int) (scrollRatio * (visibleHeight - barHeight));
             
@@ -257,8 +265,10 @@ public class EditorComponent extends BaseComponent {
         if (maxWidth > availableWidth) {
             int trackY = this.y + this.height - scrollbarSize;
             context.fill(this.x + gutterWidth, trackY, this.x + this.width, this.y + this.height, trackColor);
-            
-            float scrollRatio = (float) scrollX / (maxWidth - availableWidth);
+
+            float scrollRatio = getMaxScrollX() <= 0
+                    ? 0
+                    : (float) scrollX / getMaxScrollX();
             int barWidth = Math.max(10, (int) ((float) availableWidth * availableWidth / maxWidth));
             int barX = (int) (scrollRatio * (availableWidth - barWidth));
             
@@ -293,13 +303,24 @@ public class EditorComponent extends BaseComponent {
         int cursorOffsetInLine = this.editBox.getCursor() - currentLine.beginIndex();
         String lineText = this.editBox.getText().substring(currentLine.beginIndex(), currentLine.endIndex());
         int cursorXInLine = this.textRenderer.getWidth(lineText.substring(0, Math.max(0, Math.min(cursorOffsetInLine, lineText.length()))));
-        
-        if (cursorXInLine < scrollX) {
-            scrollX = cursorXInLine;
-        } else if (cursorXInLine > scrollX + visibleWidth) {
-            scrollX = cursorXInLine - visibleWidth;
+
+        if (!initialScrollPositioned) {
+            initialScrollPositioned = true;
+
+            scrollX = Math.max(
+                    0,
+                    cursorXInLine - (int)(visibleWidth * 0.8)
+            );
+
+            scrollX = Math.min(scrollX, getMaxScrollX());
+        } else {
+            if (cursorXInLine < scrollX) {
+                scrollX = cursorXInLine;
+            } else if (cursorXInLine > scrollX + visibleWidth) {
+                scrollX = cursorXInLine - visibleWidth;
+            }
         }
-        
+
         scrollY = Math.max(0, scrollY);
         scrollX = Math.max(0, scrollX);
 
@@ -313,12 +334,18 @@ public class EditorComponent extends BaseComponent {
                 + 10;
         
         int totalHeight = this.editBox.getLineCount() * 9;
-        int maxScrollY = Math.max(0, totalHeight - this.height + 8);
+        int maxScrollY = Math.max(
+                0,
+                totalHeight - this.height + 8 + VERTICAL_OVERSCROLL
+        );
         if (scrollY > maxScrollY) scrollY = maxScrollY;
         
         int maxWidth = this.editBox.getMaxLineWidth();
         int availableWidth = this.width - gutterWidth - 10;
-        int maxScrollX = Math.max(0, maxWidth - availableWidth);
+        int maxScrollX = Math.max(
+                0,
+                maxWidth - availableWidth + HORIZONTAL_OVERSCROLL
+        );
         if (scrollX > maxScrollX) scrollX = maxScrollX;
 
         if (!cyclingSuggestions) {
@@ -397,7 +424,11 @@ public class EditorComponent extends BaseComponent {
                 if (trackLength > 0) {
                     double deltaPos = mouseY - dragPosStart;
                     double deltaScroll = (deltaPos / trackLength) * (totalHeight - this.height);
-                    scrollY = MathHelper.clamp(dragScrollStart + deltaScroll, 0, totalHeight - this.height);
+                    scrollY = MathHelper.clamp(
+                            dragScrollStart + deltaScroll,
+                            0,
+                            getMaxScrollY()
+                    );
                 }
                 return true;
             }
@@ -410,7 +441,11 @@ public class EditorComponent extends BaseComponent {
                 if (trackLength > 0) {
                     double deltaPos = mouseX - dragPosStart;
                     double deltaScroll = (deltaPos / trackLength) * (maxWidth - availableWidth);
-                    scrollX = MathHelper.clamp(dragScrollStart + deltaScroll, 0, maxWidth - availableWidth);
+                    scrollX = MathHelper.clamp(
+                            dragScrollStart + deltaScroll,
+                            0,
+                            getMaxScrollX()
+                    );
                 }
                 return true;
             }
@@ -440,14 +475,11 @@ public class EditorComponent extends BaseComponent {
         this.mouseY = mouseY;
         if (Screen.hasShiftDown()) {
             scrollX = Math.max(0, scrollX - amount * 15);
-            int maxWidth = this.editBox.getMaxLineWidth();
-            int gutterWidth = getGutterWidth();
-            int availableWidth = this.width - gutterWidth - 10;
-            int maxScrollX = Math.max(0, maxWidth - availableWidth);
+            int maxScrollX = getMaxScrollX();
             if (scrollX > maxScrollX) scrollX = maxScrollX;
         } else {
             scrollY = Math.max(0, scrollY - amount * 15);
-            int maxScrollY = Math.max(0, this.editBox.getLineCount() * 9 - this.height + 8);
+            int maxScrollY = getMaxScrollY();
             if (scrollY > maxScrollY) scrollY = maxScrollY;
         }
         return true;
@@ -792,5 +824,20 @@ public class EditorComponent extends BaseComponent {
             start++;
         }
         return start;
+    }
+
+    private int getMaxScrollY() {
+        int totalHeight = this.editBox.getLineCount() * 9;
+        return Math.max(0, totalHeight - this.height + 8 + VERTICAL_OVERSCROLL);
+    }
+
+    private int getMaxScrollX() {
+        int maxWidth = this.editBox.getMaxLineWidth();
+        int availableWidth = this.width - getGutterWidth() - 10;
+
+        return Math.max(
+                0,
+                maxWidth - availableWidth + HORIZONTAL_OVERSCROLL
+        );
     }
 }
