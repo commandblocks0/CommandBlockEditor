@@ -239,17 +239,6 @@ public final class CommandParser {
         return NUMBER_PATTERN.matcher(command).replaceAll("");
     }
 
-    private static String joinFrom(String[] tokens, int start, String delimiter) {
-        StringBuilder builder = new StringBuilder();
-        for (int i = start; i < tokens.length; i++) {
-            if (i > start) {
-                builder.append(delimiter);
-            }
-            builder.append(tokens[i]);
-        }
-        return builder.toString();
-    }
-
     private static double clean(double number) {
         if (!Double.isFinite(number)) {
             throw new IllegalArgumentException("Expression result is not finite");

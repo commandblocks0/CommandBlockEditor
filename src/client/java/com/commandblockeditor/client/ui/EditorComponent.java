@@ -22,6 +22,8 @@ import net.minecraft.util.math.MathHelper;
 import org.jetbrains.annotations.NotNull;
 import org.lwjgl.glfw.GLFW;
 
+import java.util.ArrayDeque;
+import java.util.Deque;
 import java.util.List;
 import java.util.function.Consumer;
 import java.util.regex.Matcher;
@@ -64,6 +66,10 @@ public class EditorComponent extends BaseComponent {
     private static final int HORIZONTAL_OVERSCROLL = 50;
     private boolean initialScrollPositioned = false;
 
+    record HistoryState(String text, int cursor) {}
+    Deque<HistoryState> undoStack = new ArrayDeque<>();
+    Deque<HistoryState> redoStack = new ArrayDeque<>();
+
     public EditorComponent() {
         this.textRenderer = MinecraftClient.getInstance().textRenderer;
         this.editBox = new CommandEditBox(this.textRenderer, 100);
@@ -74,6 +80,10 @@ public class EditorComponent extends BaseComponent {
     public void setText(String text) {
         this.editBox.setText(text.replace("\r", ""));
         this.initialScrollPositioned = false;
+
+        undoStack.clear();
+        redoStack.clear();
+        undoStack.push(new HistoryState(getText(), editBox.getCursor()));
     }
 
     public String getText() {
@@ -489,6 +499,18 @@ public class EditorComponent extends BaseComponent {
     public boolean onKeyPress(int keyCode, int scanCode, int modifiers) {
         if (!this.focused) return false;
 
+        if (Screen.hasControlDown()) {
+            if (keyCode == GLFW.GLFW_KEY_Z) {
+                undo();
+                return true;
+            }
+
+            if (keyCode == GLFW.GLFW_KEY_Y) {
+                redo();
+                return true;
+            }
+        }
+
         if (suggestions != null && !suggestions.isEmpty()) {
             if (keyCode == GLFW.GLFW_KEY_UP) {
                 selectedSuggestion = (selectedSuggestion - 1 + suggestions.getList().size()) % suggestions.getList().size();
@@ -518,6 +540,13 @@ public class EditorComponent extends BaseComponent {
             return true;
         }
 
+        if (keyCode == GLFW.GLFW_KEY_BACKSPACE
+                || keyCode == GLFW.GLFW_KEY_DELETE
+                || keyCode == GLFW.GLFW_KEY_ENTER
+                || keyCode == GLFW.GLFW_KEY_KP_ENTER) {
+            saveHistory();
+        }
+
         if (this.editBox.handleSpecialKey(keyCode)) {
             cyclingSuggestions = false;
             return true;
@@ -531,7 +560,33 @@ public class EditorComponent extends BaseComponent {
         if (!this.focused) return false;
         if (net.minecraft.util.StringHelper.isValidChar(chr)) {
             cyclingSuggestions = false;
-            this.editBox.replaceSelection(Character.toString(chr));
+
+            if (chr == ')' || chr == ']' || chr == '}' ||
+                    chr == '"' || chr == '\'' || chr == '`') {
+
+                int cursor = editBox.getCursor();
+                String text = editBox.getText();
+
+                if (cursor < text.length() && text.charAt(cursor) == chr) {
+                    editBox.setSelecting(false);
+                    editBox.moveCursor(CursorMovement.RELATIVE, 1);
+                    return true;
+                }
+            }
+
+            switch (chr) {
+                case '(' -> insertPair("()");
+                case '[' -> insertPair("[]");
+                case '{' -> insertPair("{}");
+                case '"' -> insertPair("\"\"");
+                case '\'' -> insertPair("''");
+                case '`' -> insertPair("``");
+                default -> {
+                    saveHistory();
+                    editBox.replaceSelection(Character.toString(chr));
+                }
+            }
+
             return true;
         }
         return false;
@@ -719,9 +774,17 @@ public class EditorComponent extends BaseComponent {
         pendingSuggestions = networkHandler.getCommandDispatcher().getCompletionSuggestions(parse, cursorInLine);
         pendingSuggestions.thenAccept(result -> {
             MinecraftClient.getInstance().execute(() -> {
-                suggestions = result;
-                selectedSuggestion = 0;
-                suggestionScroll = 0;
+                List<Suggestion> filtered = result.getList().stream()
+                        .filter(s -> !s.getText().isBlank())
+                        .toList();
+
+                if (filtered.isEmpty()) {
+                    suggestions = null;
+                } else {
+                    suggestions = new Suggestions(result.getRange(), filtered);
+                    selectedSuggestion = 0;
+                    suggestionScroll = 0;
+                }
             });
         });
     }
@@ -769,6 +832,10 @@ public class EditorComponent extends BaseComponent {
 
     private void applySuggestion(int offset) {
         if (suggestions == null || suggestions.isEmpty()) return;
+
+        if (offset == 0) {
+            saveHistory();
+        }
 
         boolean wasCycling = cyclingSuggestions;
         if (!cyclingSuggestions) {
@@ -839,5 +906,46 @@ public class EditorComponent extends BaseComponent {
                 0,
                 maxWidth - availableWidth + HORIZONTAL_OVERSCROLL
         );
+    }
+
+    private void saveHistory() {
+        HistoryState state = new HistoryState(getText(), editBox.getCursor());
+
+        if (!undoStack.isEmpty() && undoStack.peek().equals(state)) {
+            return;
+        }
+
+        undoStack.push(state);
+        redoStack.clear();
+    }
+
+    private void undo() {
+        if (undoStack.size() <= 1) return;
+
+        redoStack.push(new HistoryState(getText(), editBox.getCursor()));
+
+        undoStack.pop();
+        HistoryState state = undoStack.peek();
+
+        editBox.setText(state.text());
+        editBox.moveCursor(CursorMovement.ABSOLUTE, state.cursor());
+    }
+
+    private void redo() {
+        if (redoStack.isEmpty()) return;
+
+        undoStack.push(new HistoryState(getText(), editBox.getCursor()));
+
+        HistoryState state = redoStack.pop();
+
+        editBox.setText(state.text());
+        editBox.moveCursor(CursorMovement.ABSOLUTE, state.cursor());
+    }
+
+    private void insertPair(String pair) {
+        saveHistory();
+        editBox.setSelecting(false);
+        editBox.replaceSelection(pair);
+        editBox.moveCursor(CursorMovement.RELATIVE, -1);
     }
 }
