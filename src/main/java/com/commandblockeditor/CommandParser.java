@@ -6,12 +6,13 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 public final class CommandParser {
     private static final Pattern NUMBER_PATTERN = Pattern.compile("-?\\d+(\\.\\d+)?");
     private static final Pattern REPEAT_PATTERN = Pattern.compile("\\d+");
     private static final Pattern EXPRESSION_PATTERN = Pattern.compile("`([^`]+)`");
-    private static final Pattern VALID_EXPRESSION_PATTERN = Pattern.compile("[0-9i+\\-*/()\\s.]+");
+    private static final Pattern VALID_EXPRESSION_PATTERN = Pattern.compile("[0-9i+\\-*/()\\s.;]+");
     private static final Pattern PREFIX_PATTERN = Pattern.compile("^([!?@\\d\\s]*):(.*)$");
 
     private CommandParser() {
@@ -79,11 +80,11 @@ public final class CommandParser {
             if (current.patterns == null) {
                 current.patterns = new ArrayList<>();
                 for (int i = 0; i < numbers.size(); i++) {
-                    double previous = i < current.lastNumbers.size() ? current.lastNumbers.get(i) : 0;
-                    current.patterns.add(new NumberPattern(previous, clean(numbers.get(i) - previous)));
+                    double previous = current.history.get(i).getFirst();
+                    current.patterns.add(new NumberPattern(previous, clean(numbers.get(i) - previous), null));
                 }
                 current.count++;
-                current.lastNumbers = numbers;
+                addHistory(current, numbers);
                 continue;
             }
 
@@ -95,19 +96,32 @@ public final class CommandParser {
                 }
 
                 NumberPattern pattern = current.patterns.get(i);
-                double expected = clean(pattern.start + current.count * pattern.diff);
-                if (Double.compare(numbers.get(i), expected) != 0) {
-                    valid = false;
-                    break;
+                if (pattern.repeat != null) {
+                    double expected = pattern.repeat.get(current.count % pattern.repeat.size());
+                    if (Double.compare(numbers.get(i), expected) != 0) {
+                        valid = false;
+                        break;
+                    }
+                } else {
+                    double expected = clean(pattern.start + current.count * pattern.diff);
+                    if (Double.compare(numbers.get(i), expected) != 0) {
+                        valid = false;
+                        break;
+                    }
                 }
             }
 
             if (valid) {
                 current.count++;
-                current.lastNumbers = numbers;
+                addHistory(current, numbers);
             } else {
-                current = new Group(command, numbers);
-                groups.add(current);
+                if (current.count >= 2 && tryConvertToRepeating(current, numbers)) {
+                    current.count++;
+                    addHistory(current, numbers);
+                } else {
+                    current = new Group(command, numbers);
+                    groups.add(current);
+                }
             }
         }
 
@@ -176,7 +190,14 @@ public final class CommandParser {
 
             if (VALID_EXPRESSION_PATTERN.matcher(expression).matches()) {
                 try {
-                    replacement = formatNumber(clean(new ExpressionParser(expression, iteration).parse()));
+                    String selected = expression;
+
+                    if (expression.contains(";")) {
+                        String[] parts = expression.split(";");
+                        selected = parts[iteration % parts.length].trim();
+                    }
+
+                    replacement = formatNumber(clean(new ExpressionParser(selected, iteration).parse()));
                 } catch (IllegalArgumentException ignored) {}
             }
 
@@ -209,6 +230,13 @@ public final class CommandParser {
     }
 
     private static String patternExpression(NumberPattern pattern) {
+        if (pattern.repeat != null) {
+            return "`" +
+                    pattern.repeat.stream()
+                            .map(CommandParser::formatNumber)
+                            .collect(Collectors.joining(";"))
+                    + "`";
+        }
         if (Double.compare(pattern.diff, 0) == 0) {
             return formatNumber(pattern.start);
         }
@@ -239,17 +267,6 @@ public final class CommandParser {
         return NUMBER_PATTERN.matcher(command).replaceAll("");
     }
 
-    private static String joinFrom(String[] tokens, int start, String delimiter) {
-        StringBuilder builder = new StringBuilder();
-        for (int i = start; i < tokens.length; i++) {
-            if (i > start) {
-                builder.append(delimiter);
-            }
-            builder.append(tokens[i]);
-        }
-        return builder.toString();
-    }
-
     private static double clean(double number) {
         if (!Double.isFinite(number)) {
             throw new IllegalArgumentException("Expression result is not finite");
@@ -268,16 +285,20 @@ public final class CommandParser {
         private final ParsedCommand command;
         private int count = 1;
         private List<NumberPattern> patterns;
-        private List<Double> lastNumbers;
+        private final List<List<Double>> history = new ArrayList<>();
 
-        private Group(ParsedCommand command, List<Double> lastNumbers) {
+        private Group(ParsedCommand command, List<Double> numbers) {
             this.command = command;
-            this.lastNumbers = lastNumbers;
+
+            for (Double number : numbers) {
+                List<Double> column = new ArrayList<>();
+                column.add(number);
+                history.add(column);
+            }
         }
     }
 
-    private record NumberPattern(double start, double diff) {
-    }
+    private record NumberPattern(double start, double diff, List<Double> repeat) {}
 
     private static final class ExpressionParser {
         private final String expression;
@@ -383,5 +404,66 @@ public final class CommandParser {
                 position++;
             }
         }
+    }
+
+    private static void addHistory(Group group, List<Double> numbers) {
+        for (int i = 0; i < numbers.size(); i++) {
+            group.history.get(i).add(numbers.get(i));
+        }
+    }
+
+    private static boolean tryConvertToRepeating(Group group, List<Double> numbers) {
+        List<NumberPattern> patterns = new ArrayList<>();
+
+        for (int i = 0; i < group.history.size(); i++) {
+            List<Double> history = new ArrayList<>(group.history.get(i));
+            history.add(numbers.get(i));
+
+            NumberPattern old = group.patterns.get(i);
+
+            if (old.repeat == null) {
+                double expected = clean(old.start + group.count * old.diff);
+
+                if (Double.compare(numbers.get(i), expected) == 0) {
+                    patterns.add(old);
+                    continue;
+                }
+            }
+
+            List<Double> repeat = repeatingPattern(history);
+            if (repeat == null) {
+                return false;
+            }
+
+            patterns.add(new NumberPattern(0, Double.NaN, repeat));
+        }
+
+        group.patterns = patterns;
+        return true;
+    }
+
+    private static List<Double> repeatingPattern(List<Double> seq) {
+        int n = seq.size();
+
+        if (n < 3) {
+            return null;
+        }
+
+        for (int length = 2; length < n; length++) {
+            boolean valid = true;
+
+            for (int i = 0; i < n; i++) {
+                if (Double.compare(seq.get(i), seq.get(i % length)) != 0) {
+                    valid = false;
+                    break;
+                }
+            }
+
+            if (valid) {
+                return new ArrayList<>(seq.subList(0, length));
+            }
+        }
+
+        return null;
     }
 }

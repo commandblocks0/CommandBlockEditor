@@ -22,6 +22,8 @@ import net.minecraft.util.math.MathHelper;
 import org.jetbrains.annotations.NotNull;
 import org.lwjgl.glfw.GLFW;
 
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.function.Consumer;
 import java.util.regex.Matcher;
@@ -64,6 +66,10 @@ public class EditorComponent extends BaseComponent {
     private static final int HORIZONTAL_OVERSCROLL = 50;
     private boolean initialScrollPositioned = false;
 
+    record HistoryState(String text, int cursor) {}
+    List<HistoryState> history = new ArrayList<>();
+    int historyIndex = -1;
+
     public EditorComponent() {
         this.textRenderer = MinecraftClient.getInstance().textRenderer;
         this.editBox = new CommandEditBox(this.textRenderer, 100);
@@ -74,6 +80,10 @@ public class EditorComponent extends BaseComponent {
     public void setText(String text) {
         this.editBox.setText(text.replace("\r", ""));
         this.initialScrollPositioned = false;
+
+        history.clear();
+        history.add(new HistoryState(getText(), editBox.getCursor()));
+        historyIndex = 0;
     }
 
     public String getText() {
@@ -489,6 +499,107 @@ public class EditorComponent extends BaseComponent {
     public boolean onKeyPress(int keyCode, int scanCode, int modifiers) {
         if (!this.focused) return false;
 
+        if (Screen.hasControlDown()) {
+            if (keyCode == GLFW.GLFW_KEY_Z) {
+                undo();
+                return true;
+            }
+
+            if (keyCode == GLFW.GLFW_KEY_Y) {
+                redo();
+                return true;
+            }
+
+            if (Screen.hasShiftDown() && keyCode == GLFW.GLFW_KEY_K) {
+
+                int lineIndex = editBox.getCurrentLineIndex();
+                CommandEditBox.Substring line = editBox.getLine(lineIndex);
+
+                String text = editBox.getText();
+
+                int start = line.beginIndex();
+                int end = line.endIndex();
+
+                if (end < text.length()) {
+                    end++;
+                }
+                else if (start > 0) {
+                    start--;
+                }
+
+                String newText = text.substring(0, start) + text.substring(end);
+
+                editBox.setText(newText);
+                editBox.setSelecting(false);
+
+                int cursor = newText.indexOf('\n', start);
+
+                if (cursor == -1) {
+                    cursor = newText.length();
+                }
+
+                editBox.moveCursor(CursorMovement.ABSOLUTE, cursor);
+
+                saveHistory();
+                return true;
+            }
+        }
+
+        if (Screen.hasAltDown()) {
+
+            if (Screen.hasShiftDown() && keyCode == GLFW.GLFW_KEY_DOWN) {
+                int line = editBox.getCurrentLineIndex();
+                List<String> lines = new ArrayList<>(List.of(editBox.getText().split("\n", -1)));
+                CommandEditBox.Substring current = editBox.getLine(line);
+                int column = editBox.getCursor() - current.beginIndex();
+                lines.add(line+1, lines.get(line));
+                String newText = String.join("\n", lines);
+                editBox.setText(newText);
+                CommandEditBox.Substring duplicatedLine = editBox.getLine(line + 1);
+                editBox.setSelecting(false);
+                editBox.moveCursor(
+                        CursorMovement.ABSOLUTE,
+                        Math.min(duplicatedLine.beginIndex() + column, duplicatedLine.endIndex())
+                );
+                saveHistory();
+                return true;
+            }
+
+            if (keyCode == GLFW.GLFW_KEY_UP) {
+                int line = editBox.getCurrentLineIndex();
+                List<String> lines = new ArrayList<>(List.of(editBox.getText().split("\n", -1)));
+                if (line == 0) return true;
+                CommandEditBox.Substring current = editBox.getLine(line);
+                int column = editBox.getCursor() - current.beginIndex();
+                Collections.swap(lines, line, line - 1);
+                String newText = String.join("\n", lines);
+                editBox.setText(newText);
+                CommandEditBox.Substring movedLine = editBox.getLine(line - 1);
+                editBox.moveCursor(
+                        CursorMovement.ABSOLUTE,
+                        Math.min(movedLine.beginIndex() + column, movedLine.endIndex())
+                );
+                saveHistory();
+                return true;
+            } else if (keyCode == GLFW.GLFW_KEY_DOWN) {
+                int line = editBox.getCurrentLineIndex();
+                List<String> lines = new ArrayList<>(List.of(editBox.getText().split("\n", -1)));
+                if (line >= lines.size() - 1) return true;
+                CommandEditBox.Substring current = editBox.getLine(line);
+                int column = editBox.getCursor() - current.beginIndex();
+                Collections.swap(lines, line, line + 1);
+                String newText = String.join("\n", lines);
+                editBox.setText(newText);
+                CommandEditBox.Substring movedLine = editBox.getLine(line + 1);
+                editBox.moveCursor(
+                        CursorMovement.ABSOLUTE,
+                        Math.min(movedLine.beginIndex() + column, movedLine.endIndex())
+                );
+                saveHistory();
+                return true;
+            }
+        }
+
         if (suggestions != null && !suggestions.isEmpty()) {
             if (keyCode == GLFW.GLFW_KEY_UP) {
                 selectedSuggestion = (selectedSuggestion - 1 + suggestions.getList().size()) % suggestions.getList().size();
@@ -519,6 +630,13 @@ public class EditorComponent extends BaseComponent {
         }
 
         if (this.editBox.handleSpecialKey(keyCode)) {
+            if (keyCode == GLFW.GLFW_KEY_BACKSPACE
+                    || keyCode == GLFW.GLFW_KEY_DELETE
+                    || keyCode == GLFW.GLFW_KEY_ENTER
+                    || keyCode == GLFW.GLFW_KEY_KP_ENTER) {
+                saveHistory();
+            }
+
             cyclingSuggestions = false;
             return true;
         }
@@ -531,7 +649,33 @@ public class EditorComponent extends BaseComponent {
         if (!this.focused) return false;
         if (net.minecraft.util.StringHelper.isValidChar(chr)) {
             cyclingSuggestions = false;
-            this.editBox.replaceSelection(Character.toString(chr));
+
+            if (chr == ')' || chr == ']' || chr == '}' ||
+                    chr == '"' || chr == '\'' || chr == '`') {
+
+                int cursor = editBox.getCursor();
+                String text = editBox.getText();
+
+                if (cursor < text.length() && text.charAt(cursor) == chr) {
+                    editBox.setSelecting(false);
+                    editBox.moveCursor(CursorMovement.RELATIVE, 1);
+                    return true;
+                }
+            }
+
+            switch (chr) {
+                case '(' -> insertPair("()");
+                case '[' -> insertPair("[]");
+                case '{' -> insertPair("{}");
+                case '"' -> insertPair("\"\"");
+                case '\'' -> insertPair("''");
+                case '`' -> insertPair("``");
+                default -> {
+                    editBox.replaceSelection(Character.toString(chr));
+                    saveHistory();
+                }
+            }
+
             return true;
         }
         return false;
@@ -719,9 +863,17 @@ public class EditorComponent extends BaseComponent {
         pendingSuggestions = networkHandler.getCommandDispatcher().getCompletionSuggestions(parse, cursorInLine);
         pendingSuggestions.thenAccept(result -> {
             MinecraftClient.getInstance().execute(() -> {
-                suggestions = result;
-                selectedSuggestion = 0;
-                suggestionScroll = 0;
+                List<Suggestion> filtered = result.getList().stream()
+                        .filter(s -> !s.getText().isBlank())
+                        .toList();
+
+                if (filtered.isEmpty()) {
+                    suggestions = null;
+                } else {
+                    suggestions = new Suggestions(result.getRange(), filtered);
+                    selectedSuggestion = 0;
+                    suggestionScroll = 0;
+                }
             });
         });
     }
@@ -809,6 +961,7 @@ public class EditorComponent extends BaseComponent {
         editBox.moveCursor(CursorMovement.ABSOLUTE, newCursor);
 
         if (offset == 0) {
+            saveHistory();
             suggestions = null;
             cyclingSuggestions = false;
         }
@@ -839,5 +992,47 @@ public class EditorComponent extends BaseComponent {
                 0,
                 maxWidth - availableWidth + HORIZONTAL_OVERSCROLL
         );
+    }
+
+    private void saveHistory() {
+        HistoryState state = new HistoryState(getText(), editBox.getCursor());
+
+        if (historyIndex >= 0 && history.get(historyIndex).equals(state)) {
+            return;
+        }
+
+        while (history.size() > historyIndex + 1) {
+            history.remove(history.size() - 1);
+        }
+
+        history.add(state);
+        historyIndex++;
+    }
+
+    private void undo() {
+        if (historyIndex <= 0) return;
+
+        historyIndex--;
+
+        HistoryState state = history.get(historyIndex);
+        editBox.setText(state.text());
+        editBox.moveCursor(CursorMovement.ABSOLUTE, state.cursor());
+    }
+
+    private void redo() {
+        if (historyIndex >= history.size() - 1) return;
+
+        historyIndex++;
+
+        HistoryState state = history.get(historyIndex);
+        editBox.setText(state.text());
+        editBox.moveCursor(CursorMovement.ABSOLUTE, state.cursor());
+    }
+
+    private void insertPair(String pair) {
+        editBox.setSelecting(false);
+        editBox.replaceSelection(pair);
+        editBox.moveCursor(CursorMovement.RELATIVE, -1);
+        saveHistory();
     }
 }

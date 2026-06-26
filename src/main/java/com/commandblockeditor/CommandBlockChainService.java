@@ -94,7 +94,7 @@ public final class CommandBlockChainService {
     private static void clearOldTail(ServerWorld world, BlockPos startPos, Direction facing) {
         BlockPos current = startPos;
 
-        while (current.equals(startPos) || world.getBlockState(current).isOf(Blocks.CHAIN_COMMAND_BLOCK)) {
+        while (world.getBlockState(current).isOf(Blocks.COMMAND_BLOCK) || world.getBlockState(current).isOf(Blocks.CHAIN_COMMAND_BLOCK) || world.getBlockState(current).isOf(Blocks.REPEATING_COMMAND_BLOCK)) {
             world.setBlockState(current, Blocks.AIR.getDefaultState(), Block.NOTIFY_ALL);
             current = current.offset(facing);
         }
