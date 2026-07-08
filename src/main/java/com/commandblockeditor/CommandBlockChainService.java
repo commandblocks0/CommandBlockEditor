@@ -52,7 +52,7 @@ public final class CommandBlockChainService {
     }
 
     public static void write(ServerPlayerEntity player, BlockPos rootPos, String editorText) {
-        ServerWorld world = player.getServerWorld();
+        ServerWorld world = player.getEntityWorld();
         Direction facing = getFacing(world, rootPos);
         List<CommandParser.ParsedCommand> commands = CommandParser.toCommands(editorText.lines().toList());
 

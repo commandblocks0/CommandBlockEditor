@@ -1,17 +1,16 @@
 package com.commandblockeditor.client.ui;
 
+import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.font.TextRenderer;
+import net.minecraft.client.input.CursorMovement;
+import net.minecraft.util.StringHelper;
+import org.lwjgl.glfw.GLFW;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
 
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.font.TextRenderer;
-import net.minecraft.client.gui.screen.Screen;
-import net.minecraft.client.input.CursorMovement;
-import net.minecraft.util.StringHelper;
-
 public class CommandEditBox {
-    public static final int UNLIMITED_LENGTH = Integer.MAX_VALUE;
     private final TextRenderer textRenderer;
     private final List<Substring> lines = new ArrayList<>();
     private String text;
@@ -19,7 +18,6 @@ public class CommandEditBox {
     private int selectionEnd;
     private boolean selecting;
     private int maxLength = Integer.MAX_VALUE;
-    private final int width;
     private Consumer<String> changeListener = (text) -> {
     };
     private Runnable cursorChangeListener = () -> {
@@ -27,7 +25,6 @@ public class CommandEditBox {
 
     public CommandEditBox(TextRenderer textRenderer, int width) {
         this.textRenderer = textRenderer;
-        this.width = width;
         this.setText("");
     }
 
@@ -148,19 +145,22 @@ public class CommandEditBox {
         this.moveCursor(CursorMovement.ABSOLUTE, substring.beginIndex() + k);
     }
 
-    public boolean handleSpecialKey(int keyCode) {
-        this.selecting = Screen.hasShiftDown();
-        if (Screen.isSelectAll(keyCode)) {
+    public boolean handleSpecialKey(int keyCode, int modifiers) {
+        boolean shift = (modifiers & GLFW.GLFW_MOD_SHIFT) != 0;
+        boolean ctrl = (modifiers & GLFW.GLFW_MOD_CONTROL) != 0;
+
+        this.selecting = shift;
+        if (ctrl && keyCode == GLFW.GLFW_KEY_A) {
             this.cursor = this.text.length();
             this.selectionEnd = 0;
             return true;
-        } else if (Screen.isCopy(keyCode)) {
+        } else if (ctrl && keyCode == GLFW.GLFW_KEY_C) {
             MinecraftClient.getInstance().keyboard.setClipboard(this.getSelectedText());
             return true;
-        } else if (Screen.isPaste(keyCode)) {
+        } else if (ctrl && keyCode == GLFW.GLFW_KEY_V) {
             this.replaceSelection(MinecraftClient.getInstance().keyboard.getClipboard());
             return true;
-        } else if (Screen.isCut(keyCode)) {
+        } else if (ctrl && keyCode == GLFW.GLFW_KEY_X) {
             MinecraftClient.getInstance().keyboard.setClipboard(this.getSelectedText());
             this.replaceSelection("");
             return true;
@@ -171,7 +171,7 @@ public class CommandEditBox {
                     this.replaceSelection("\n");
                     return true;
                 case 259:
-                    if (Screen.hasControlDown()) {
+                    if (ctrl) {
                         Substring substring = this.getPreviousWordAtCursor();
                         this.delete(substring.beginIndex() - this.cursor);
                     } else {
@@ -180,7 +180,7 @@ public class CommandEditBox {
 
                     return true;
                 case 261:
-                    if (Screen.hasControlDown()) {
+                    if (ctrl) {
                         Substring substring = this.getNextWordAtCursor();
                         this.delete(substring.beginIndex() - this.cursor);
                     } else {
@@ -189,7 +189,7 @@ public class CommandEditBox {
 
                     return true;
                 case 262:
-                    if (Screen.hasControlDown()) {
+                    if (ctrl) {
                         Substring substring = this.getNextWordAtCursor();
                         this.moveCursor(CursorMovement.ABSOLUTE, substring.beginIndex());
                     } else {
@@ -198,7 +198,7 @@ public class CommandEditBox {
 
                     return true;
                 case 263:
-                    if (Screen.hasControlDown()) {
+                    if (ctrl) {
                         Substring substring = this.getPreviousWordAtCursor();
                         this.moveCursor(CursorMovement.ABSOLUTE, substring.beginIndex());
                     } else {
@@ -207,13 +207,13 @@ public class CommandEditBox {
 
                     return true;
                 case 264:
-                    if (!Screen.hasControlDown()) {
+                    if (!ctrl) {
                         this.moveCursorLine(1);
                     }
 
                     return true;
                 case 265:
-                    if (!Screen.hasControlDown()) {
+                    if (!ctrl) {
                         this.moveCursorLine(-1);
                     }
 
@@ -225,7 +225,7 @@ public class CommandEditBox {
                     this.moveCursor(CursorMovement.END, 0);
                     return true;
                 case 268:
-                    if (Screen.hasControlDown()) {
+                    if (ctrl) {
                         this.moveCursor(CursorMovement.ABSOLUTE, 0);
                     } else {
                         this.moveCursor(CursorMovement.ABSOLUTE, this.getCurrentLine().beginIndex());
@@ -233,7 +233,7 @@ public class CommandEditBox {
 
                     return true;
                 case 269:
-                    if (Screen.hasControlDown()) {
+                    if (ctrl) {
                         this.moveCursor(CursorMovement.END, 0);
                     } else {
                         this.moveCursor(CursorMovement.ABSOLUTE, this.getCurrentLine().endIndex());

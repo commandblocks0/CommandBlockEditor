@@ -1,36 +1,39 @@
 package com.commandblockeditor.client.ui;
 
-import java.util.function.Consumer;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
+import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.font.TextRenderer;
+import net.minecraft.client.gui.Click;
 import net.minecraft.client.gui.DrawContext;
-import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.screen.narration.NarrationMessageBuilder;
 import net.minecraft.client.gui.screen.narration.NarrationPart;
 import net.minecraft.client.gui.widget.ScrollableWidget;
-import net.minecraft.client.render.RenderLayer;
 import net.minecraft.text.Text;
 import net.minecraft.util.StringHelper;
 import net.minecraft.util.Util;
+import org.lwjgl.glfw.GLFW;
+
+import java.util.function.Consumer;
 
 @Environment(EnvType.CLIENT)
 public class CommandEditBoxWidget extends ScrollableWidget {
+    private static final int PADDING = 4;
     private static final int GUTTER_PADDING = 4;
     private static final int SCROLLBAR_SIZE = 6;
     private final TextRenderer textRenderer;
-    private final Text placeholder;
     private final CommandEditBox editBox;
     private long lastSwitchFocusTime = Util.getMeasuringTimeMs();
     private double scrollX;
     private boolean scrollingX;
     private boolean scrollingYManual;
+    
+    private final boolean SHIFT = GLFW.glfwGetKey(MinecraftClient.getInstance().getWindow().getHandle(), GLFW.GLFW_KEY_LEFT_SHIFT) == GLFW.GLFW_PRESS || GLFW.glfwGetKey(MinecraftClient.getInstance().getWindow().getHandle(), GLFW.GLFW_KEY_RIGHT_SHIFT) == GLFW.GLFW_PRESS;
 
     public CommandEditBoxWidget(TextRenderer textRenderer, int x, int y, int width, int height, Text placeholder, Text message) {
         super(x, y, width, height, message);
         this.textRenderer = textRenderer;
-        this.placeholder = placeholder;
-        this.editBox = new CommandEditBox(textRenderer, width - this.getPaddingDoubled());
+        this.editBox = new CommandEditBox(textRenderer, width - PADDING*2);
         this.editBox.setCursorChangeListener(this::onCursorChange);
     }
 
@@ -50,14 +53,14 @@ public class CommandEditBoxWidget extends ScrollableWidget {
 
     public int getMaxScrollX() {
         int gutterWidth = getGutterWidth();
-        int visibleWidth = this.width - this.getPaddingDoubled() - gutterWidth - SCROLLBAR_SIZE - 4;
+        int visibleWidth = this.width - PADDING*2 - gutterWidth - SCROLLBAR_SIZE - 4;
         return Math.max(0, this.editBox.getMaxLineWidth() - visibleWidth + 4);
     }
 
     @Override
-    protected int getMaxScrollY() {
+    public int getMaxScrollY() {
         int contentHeight = this.getContentsHeight();
-        int textAreaHeight = this.height - this.getPaddingDoubled();
+        int textAreaHeight = this.height - PADDING*2;
         if (this.getMaxScrollX() > 0) {
             textAreaHeight -= (SCROLLBAR_SIZE + 2);
         }
@@ -91,44 +94,44 @@ public class CommandEditBoxWidget extends ScrollableWidget {
 
     private boolean isWithinHorizontalScrollbar(double mouseX, double mouseY) {
         int yStart = this.getY() + this.height - SCROLLBAR_SIZE - 2;
-        int startX = this.getX() + getGutterWidth() + this.getPadding();
+        int startX = this.getX() + getGutterWidth() + PADDING;
         return this.getMaxScrollX() > 0 && mouseX >= (double)startX && mouseX <= (double)(this.getX() + this.width - SCROLLBAR_SIZE - 2) && mouseY >= (double)yStart && mouseY <= (double)(this.getY() + this.height);
     }
 
     @Override
-    public boolean mouseClicked(double mouseX, double mouseY, int button) {
+    public boolean mouseClicked(Click click, boolean doubled) {
         if (!this.visible || !this.isFocused()) return false;
         
-        if (this.isWithinHorizontalScrollbar(mouseX, mouseY) && button == 0) {
+        if (this.isWithinHorizontalScrollbar(click.x(), click.y()) && click.button() == 0) {
             this.scrollingX = true;
             return true;
         }
 
-        if (this.isWithinVerticalScrollbar(mouseX, mouseY) && button == 0) {
+        if (this.isWithinVerticalScrollbar(click.x(), click.y()) && click.button() == 0) {
             this.scrollingYManual = true;
             return true;
         }
 
-        if (this.isWithinBounds(mouseX, mouseY) && button == 0) {
-            this.editBox.setSelecting(Screen.hasShiftDown());
-            this.moveCursor(mouseX, mouseY);
+        if (this.isMouseOver(click.x(), click.y()) && click.button() == 0) {
+            this.editBox.setSelecting(SHIFT);
+            this.moveCursor(click.x(), click.y());
             return true;
         }
+
         return false;
     }
 
     @Override
-    public boolean mouseReleased(double mouseX, double mouseY, int button) {
-        if (button == 0) {
+    public void onRelease(Click click) {
+        if (click.button() == 0) {
             this.scrollingX = false;
             this.scrollingYManual = false;
         }
-        return super.mouseReleased(mouseX, mouseY, button);
     }
 
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double horizontalAmount, double verticalAmount) {
-        if (Screen.hasShiftDown()) {
+        if (SHIFT) {
             this.setScrollX(this.getScrollX() - verticalAmount * 15.0);
             return true;
         }
@@ -136,14 +139,14 @@ public class CommandEditBoxWidget extends ScrollableWidget {
     }
 
     @Override
-    public boolean mouseDragged(double mouseX, double mouseY, int button, double deltaX, double deltaY) {
+    public boolean mouseDragged(Click click, double offsetX, double offsetY) {
         if (this.scrollingX) {
             int maxScrollX = this.getMaxScrollX();
-            int startX = this.getX() + getGutterWidth() + this.getPadding();
+            int startX = this.getX() + getGutterWidth() + PADDING;
             int trackWidth = this.width - (startX - this.getX()) - SCROLLBAR_SIZE - 4;
             int thumbWidth = this.getHorizontalScrollbarThumbWidth();
             double d = (double)Math.max(1, maxScrollX) / (double)Math.max(1, trackWidth - thumbWidth);
-            this.setScrollX(this.getScrollX() + deltaX * d);
+            this.setScrollX(this.getScrollX() + offsetX * d);
             return true;
         }
         if (this.scrollingYManual) {
@@ -151,31 +154,29 @@ public class CommandEditBoxWidget extends ScrollableWidget {
             int scrollbarHeight = this.height - (this.getMaxScrollX() > 0 ? SCROLLBAR_SIZE + 2 : 0);
             int thumbHeight = Math.max(8, (int)((float)(scrollbarHeight * scrollbarHeight) / (float)Math.max(1, this.getContentsHeight())));
             double d = (double)Math.max(1, maxScrollY) / (double)Math.max(1, scrollbarHeight - thumbHeight);
-            this.setScrollY(this.getScrollY() + deltaY * d);
+            this.setScrollY(this.getScrollY() + offsetY * d);
             return true;
         }
-        if (this.isWithinBounds(mouseX, mouseY) && button == 0) {
+        if (this.isMouseOver(click.x(), click.y()) && click.button() == 0) {
             this.editBox.setSelecting(true);
-            this.moveCursor(mouseX, mouseY);
-            this.editBox.setSelecting(Screen.hasShiftDown());
+            this.moveCursor(click.x(), click.y());
+            this.editBox.setSelecting(SHIFT);
             return true;
         }
         return false;
     }
 
     private int getHorizontalScrollbarThumbWidth() {
-        int startX = this.getX() + getGutterWidth() + this.getPadding();
+        int startX = this.getX() + getGutterWidth() + PADDING;
         int trackWidth = this.width - (startX - this.getX()) - SCROLLBAR_SIZE - 4;
         int contentsWidth = Math.max(1, this.editBox.getMaxLineWidth() + 4);
         return Math.max(20, Math.min(trackWidth, (int)((float)(trackWidth * trackWidth) / (float)contentsWidth)));
     }
 
-    @Override
     public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
-        return this.editBox.handleSpecialKey(keyCode);
+        return this.editBox.handleSpecialKey(keyCode, modifiers);
     }
 
-    @Override
     public boolean charTyped(char chr, int modifiers) {
         if (this.visible && this.isFocused() && StringHelper.isValidChar(chr)) {
             this.editBox.replaceSelection(Character.toString(chr));
@@ -188,35 +189,28 @@ public class CommandEditBoxWidget extends ScrollableWidget {
     public void renderWidget(DrawContext context, int mouseX, int mouseY, float delta) {
         if (this.visible) {
             int gutterWidth = getGutterWidth();
-            int padding = this.getPadding();
+            int padding = PADDING;
             boolean hasHorizontalScroll = this.getMaxScrollX() > 0;
             int textAreaHeight = this.height - (hasHorizontalScroll ? SCROLLBAR_SIZE + 2 : 0);
             int textAreaWidth = this.width - SCROLLBAR_SIZE - 2;
 
-            // Square edges (reverted from rounded)
-            // 1. Black Background
             context.fill(this.getX(), this.getY(), this.getX() + textAreaWidth, this.getY() + textAreaHeight, 0xFF000000);
 
-            // 2. Gutter Background
             int gutterBackgroundWidth = gutterWidth + padding;
             context.fill(this.getX(), this.getY(), this.getX() + gutterBackgroundWidth, this.getY() + textAreaHeight, 0xFF202020);
 
-            // Global scissor for the text/gutter area to stop bleeding at the bottom
             context.enableScissor(this.getX(), this.getY(), this.getX() + this.width, this.getY() + textAreaHeight);
 
-            // 3. Render content
             this.renderContents(context, mouseX, mouseY, delta, gutterBackgroundWidth, textAreaWidth, textAreaHeight);
 
             context.disableScissor();
 
-            // 4. Character Limit Overlay
             if (this.editBox.hasMaxLength()) {
                 int i = this.editBox.getMaxLength();
                 Text text = Text.translatable("gui.multiLineEditBox.character_limit", new Object[]{this.editBox.getText().length(), i});
                 context.drawTextWithShadow(this.textRenderer, text, this.getX() + this.width - this.textRenderer.getWidth(text), this.getY() + this.height + 4, 10526880);
             }
 
-            // 5. Custom Scrollbars
             this.drawVerticalScrollbar(context, textAreaHeight);
             if (hasHorizontalScroll) {
                 this.drawHorizontalScrollbar(context);
@@ -227,7 +221,7 @@ public class CommandEditBoxWidget extends ScrollableWidget {
     protected void renderContents(DrawContext context, int mouseX, int mouseY, float delta, int gutterBackgroundWidth, int textAreaWidth, int textAreaHeight) {
         String string = this.editBox.getText();
         int contentX = this.getX() + gutterBackgroundWidth;
-        int contentY = this.getY() + this.getPadding();
+        int contentY = this.getY() + PADDING;
         int scrollY = (int)this.getScrollY();
         
         int currentLineIdx = this.editBox.getCurrentLineIndex();
@@ -238,14 +232,11 @@ public class CommandEditBoxWidget extends ScrollableWidget {
         for (CommandEditBox.Substring substring : this.editBox.getLines()) {
             int l = contentY + (lineIdx * 9) - scrollY;
             
-            // Draw if within visible text box
             if (l + 9 > this.getY() && l < this.getY() + textAreaHeight) {
-                // Line Number
                 String lineNum = String.valueOf(lineIdx + 1);
                 int lineNumX = this.getX() + gutterBackgroundWidth - this.textRenderer.getWidth(lineNum) - 2;
                 context.drawTextWithShadow(this.textRenderer, lineNum, lineNumX, l, 0x606060);
                 
-                // Line Text
                 int lineX = contentX - (int)this.scrollX;
                 String lineText = string.substring(substring.beginIndex(), substring.endIndex());
                 
@@ -267,7 +258,6 @@ public class CommandEditBoxWidget extends ScrollableWidget {
             lineIdx++;
         }
 
-        // Selection
         if (this.editBox.hasSelection()) {
             CommandEditBox.Substring selection = this.editBox.getSelection();
             lineIdx = 0;
@@ -281,7 +271,7 @@ public class CommandEditBoxWidget extends ScrollableWidget {
                         int endX = contentX - (int)this.scrollX + this.textRenderer.getWidth(string.substring(line.beginIndex(), selEndInLine));
                         
                         context.enableScissor(contentX, this.getY(), this.getX() + textAreaWidth, this.getY() + textAreaHeight);
-                        context.fill(RenderLayer.getGuiTextHighlight(), startX, l, endX, l + 9, -16776961);
+                        context.fill(startX, l, endX, l + 9, -16776961);
                         context.disableScissor();
                     }
                 }
@@ -306,7 +296,7 @@ public class CommandEditBoxWidget extends ScrollableWidget {
 
     private void drawHorizontalScrollbar(DrawContext context) {
         int maxScrollX = this.getMaxScrollX();
-        int startX = this.getX() + getGutterWidth() + this.getPadding();
+        int startX = this.getX() + getGutterWidth() + PADDING;
         int trackWidth = this.width - (startX - this.getX()) - SCROLLBAR_SIZE - 4;
         int y = this.getY() + this.height - SCROLLBAR_SIZE;
         
@@ -317,24 +307,23 @@ public class CommandEditBoxWidget extends ScrollableWidget {
         context.fill(thumbX, y, thumbX + thumbWidth - 1, y + SCROLLBAR_SIZE - 1, 0xFFC0C0C0);
     }
 
-    @Override
     public int getContentsHeight() {
         return 9 * this.editBox.getLineCount();
     }
 
     @Override
     protected boolean overflows() {
-        return (double)this.editBox.getLineCount() > (double)(this.height - this.getPaddingDoubled()) / 9.0;
+        return (double)this.editBox.getLineCount() > (double)(this.height - PADDING*2) / 9.0;
+    }
+
+    @Override
+    protected int getContentsHeightWithPadding() {
+        return 0;
     }
 
     @Override
     protected double getDeltaYPerScroll() {
         return 4.5;
-    }
-
-    @Override
-    protected void renderContents(DrawContext context, int mouseX, int mouseY, float delta) {
-
     }
 
     private void onCursorChange() {
@@ -349,13 +338,13 @@ public class CommandEditBoxWidget extends ScrollableWidget {
             if (this.editBox.getCursor() > substring2.endIndex()) {
                 int var7 = this.editBox.getCurrentLineIndex();
                 var7 = var7 * 9 - this.height;
-                d = (double)(var7 + 9 + this.getPaddingDoubled());
+                d = (double)(var7 + 9 + PADDING*2);
             }
         }
         this.setScrollY(d);
 
         int gutterWidth = getGutterWidth();
-        int visibleWidth = this.width - this.getPaddingDoubled() - gutterWidth - SCROLLBAR_SIZE - 4;
+        int visibleWidth = this.width - PADDING*2 - gutterWidth - SCROLLBAR_SIZE - 4;
         int currentLineIdx = this.editBox.getCurrentLineIndex();
         CommandEditBox.Substring currentLine = this.editBox.getLine(currentLineIdx);
         int cursorOffsetInLine = this.editBox.getCursor() - currentLine.beginIndex();
@@ -370,8 +359,8 @@ public class CommandEditBoxWidget extends ScrollableWidget {
     }
 
     private void moveCursor(double mouseX, double mouseY) {
-        double d = mouseX - (double)this.getX() - (double)this.getPadding() - getGutterWidth() + this.scrollX;
-        double e = mouseY - (double)this.getY() - (double)this.getPadding() + this.getScrollY();
+        double d = mouseX - (double)this.getX() - (double)PADDING - getGutterWidth() + this.scrollX;
+        double e = mouseY - (double)this.getY() - (double)PADDING + this.getScrollY();
         this.editBox.moveCursor(d, e);
     }
 

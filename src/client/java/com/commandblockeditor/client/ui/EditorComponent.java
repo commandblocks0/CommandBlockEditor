@@ -5,16 +5,17 @@ import com.mojang.brigadier.ParseResults;
 import com.mojang.brigadier.StringReader;
 import com.mojang.brigadier.suggestion.Suggestion;
 import com.mojang.brigadier.suggestion.Suggestions;
-import io.wispforest.owo.ui.base.BaseComponent;
+import io.wispforest.owo.ui.base.BaseUIComponent;
 import io.wispforest.owo.ui.core.CursorStyle;
-import io.wispforest.owo.ui.core.OwoUIDrawContext;
+import io.wispforest.owo.ui.core.OwoUIGraphics;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.font.TextRenderer;
-import net.minecraft.client.gui.screen.Screen;
+import net.minecraft.client.gui.Click;
+import net.minecraft.client.input.CharInput;
 import net.minecraft.client.input.CursorMovement;
+import net.minecraft.client.input.KeyInput;
+import net.minecraft.client.network.ClientCommandSource;
 import net.minecraft.client.network.ClientPlayNetworkHandler;
-import net.minecraft.client.render.RenderLayer;
-import net.minecraft.command.CommandSource;
 import net.minecraft.text.OrderedText;
 import net.minecraft.text.Text;
 import net.minecraft.util.Util;
@@ -29,7 +30,7 @@ import java.util.function.Consumer;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-public class EditorComponent extends BaseComponent {
+public class EditorComponent extends BaseUIComponent {
 
     private static final Pattern PREFIX_PATTERN = Pattern.compile("^([!?@\\d\\s]*):");
     private static final int COLOR_PREFIX = 0xFFFFD481;
@@ -49,7 +50,7 @@ public class EditorComponent extends BaseComponent {
     private double mouseX = 0;
     private double mouseY = 0;
     
-    private Consumer<String> changeListener = (s) -> {};
+    private final Consumer<String> changeListener = (s) -> {};
     private int lastWidth = 0;
     private int lastHeight = 0;
 
@@ -74,7 +75,7 @@ public class EditorComponent extends BaseComponent {
         this.textRenderer = MinecraftClient.getInstance().textRenderer;
         this.editBox = new CommandEditBox(this.textRenderer, 100);
         this.editBox.setCursorChangeListener(this::onCursorChange);
-        this.editBox.setChangeListener(s -> this.changeListener.accept(s));
+        this.editBox.setChangeListener(this.changeListener);
     }
 
     public void setText(String text) {
@@ -90,12 +91,8 @@ public class EditorComponent extends BaseComponent {
         return this.editBox.getText();
     }
 
-    public void setChangeListener(Consumer<String> changeListener) {
-        this.changeListener = changeListener;
-    }
-
     @Override
-    public void draw(OwoUIDrawContext context, int mouseX, int mouseY, float partialTicks, float delta) {
+    public void draw(OwoUIGraphics graphics, int mouseX, int mouseY, float partialTicks, float delta) {
         this.mouseX = mouseX - this.x;
         this.mouseY = mouseY - this.y;
         if (this.width != lastWidth || this.height != lastHeight) {
@@ -117,9 +114,9 @@ public class EditorComponent extends BaseComponent {
         int currentLineIdx = this.editBox.getCurrentLineIndex();
         int cursorIdx = this.editBox.getCursor();
 
-        context.fill(this.x, this.y, this.x + this.width, this.y + this.height, 0xFF1E1E1E);
+        graphics.fill(this.x, this.y, this.x + this.width, this.y + this.height, 0xFF1E1E1E);
         
-        context.enableScissor(contentX, this.y, this.x + this.width, this.y + this.height);
+        graphics.enableScissor(contentX, this.y, this.x + this.width, this.y + this.height);
 
         int lineIdx = 0;
         for (CommandEditBox.Substring substring : this.editBox.getLines()) {
@@ -129,16 +126,16 @@ public class EditorComponent extends BaseComponent {
                 int lineX = contentX - (int)scrollX;
                 String lineText = fullText.substring(substring.beginIndex(), substring.endIndex());
                 
-                drawStyledLine(context, lineText, lineX, l);
+                drawStyledLine(graphics, lineText, lineX, l);
                 
                 if (isCursorVisible && lineIdx == currentLineIdx) {
                     int cursorOffsetInLine = cursorIdx - substring.beginIndex();
                     int cursorX = lineX + this.textRenderer.getWidth(lineText.substring(0, Math.max(0, Math.min(cursorOffsetInLine, lineText.length()))));
                     
                     if (cursorIdx == fullText.length() && cursorOffsetInLine == lineText.length() && lineIdx == this.editBox.getLineCount() - 1) {
-                        context.drawTextWithShadow(this.textRenderer, Text.literal("_"), cursorX, l, 0xFFD0D0D0);
+                        graphics.drawTextWithShadow(this.textRenderer, Text.literal("_"), cursorX, l, 0xFFD0D0D0);
                     } else {
-                        context.fill(cursorX, l - 1, cursorX + 1, l + 9, 0xFFD0D0D0);
+                        graphics.fill(cursorX, l - 1, cursorX + 1, l + 9, 0xFFD0D0D0);
                     }
                 }
             }
@@ -157,17 +154,17 @@ public class EditorComponent extends BaseComponent {
                         int startX = contentX - (int)scrollX + this.textRenderer.getWidth(fullText.substring(line.beginIndex(), selStartInLine));
                         int endX = contentX - (int)scrollX + this.textRenderer.getWidth(fullText.substring(line.beginIndex(), selEndInLine));
                         
-                        context.fill(RenderLayer.getGuiTextHighlight(), startX, l, endX, l + 9, 0xFF4040FF);
+                        graphics.fill(startX, l, endX, l + 9, 0xFF4040FF);
                     }
                 }
                 lineIdx++;
             }
         }
 
-        context.disableScissor();
+        graphics.disableScissor();
 
-        context.fill(this.x, this.y, this.x + gutterWidth, this.y + this.height, 0xFF252525);
-        context.fill(this.x + gutterWidth - 1, this.y, this.x + gutterWidth, this.y + this.height, 0xFF404040);
+        graphics.fill(this.x, this.y, this.x + gutterWidth, this.y + this.height, 0xFF252525);
+        graphics.fill(this.x + gutterWidth - 1, this.y, this.x + gutterWidth, this.y + this.height, 0xFF404040);
 
         lineIdx = 0;
         for (CommandEditBox.Substring substring : this.editBox.getLines()) {
@@ -175,18 +172,18 @@ public class EditorComponent extends BaseComponent {
             if (l + 9 > this.y && l < this.y + this.height) {
                 String lineNum = String.valueOf(lineIdx + 1);
                 int lineNumX = this.x + gutterWidth - this.textRenderer.getWidth(lineNum) - 4;
-                context.drawTextWithShadow(this.textRenderer, Text.literal(lineNum), lineNumX, l, 0xFF606060);
+                graphics.drawTextWithShadow(this.textRenderer, Text.literal(lineNum), lineNumX, l, 0xFF606060);
             }
             lineIdx++;
         }
 
-        drawScrollbars(context);
-        drawSuggestions(context);
+        drawScrollbars(graphics);
+        drawSuggestions(graphics);
     }
 
     private static final Pattern EXPRESSION_PATTERN = Pattern.compile("`([^`]+)`");
 
-    private void drawStyledLine(OwoUIDrawContext context, String line, int x, int y) {
+    private void drawStyledLine(OwoUIGraphics context, String line, int x, int y) {
         if (line.isEmpty()) return;
 
         int currentX = x;
@@ -232,7 +229,7 @@ public class EditorComponent extends BaseComponent {
                 reader.skip();
             }
 
-            ParseResults<CommandSource> parseResults = networkHandler.getCommandDispatcher().parse(reader, networkHandler.getCommandSource());
+            ParseResults<ClientCommandSource> parseResults = networkHandler.getCommandDispatcher().parse(reader, networkHandler.getCommandSource());
             OrderedText highlightedText = ChatInputSuggestorAccessor.invokeHighlight(parseResults, trimmed, 0);
             context.drawTextWithShadow(this.textRenderer, highlightedText, currentX, y, 0xFFFFFFFF);
 
@@ -247,7 +244,7 @@ public class EditorComponent extends BaseComponent {
         }
     }
 
-    private void drawScrollbars(OwoUIDrawContext context) {
+    private void drawScrollbars(OwoUIGraphics context) {
         int scrollbarSize = 5;
         int trackColor = 0xFF2A2A2A;
         int handleColor = 0xFF606060;
@@ -364,10 +361,11 @@ public class EditorComponent extends BaseComponent {
     }
 
     @Override
-    public boolean onMouseDown(double mouseX, double mouseY, int button) {
-        this.mouseX = mouseX;
-        this.mouseY = mouseY;
-        if (button == 0 && suggestions != null && !suggestions.isEmpty()) {
+    public boolean onMouseDown(Click click, boolean doubled) {
+        this.mouseX = click.x();
+        this.mouseY = click.y();
+
+        if (click.button() == 0 && suggestions != null && !suggestions.isEmpty()) {
             if (isHoveringSuggestions(mouseX, mouseY)) {
                 List<Suggestion> list = suggestions.getList();
                 int maxVisible = 10;
@@ -390,7 +388,7 @@ public class EditorComponent extends BaseComponent {
             }
         }
 
-        if (button == 0) {
+        if (click.button() == 0) {
             int gutterWidth = getGutterWidth();
             
             int totalHeight = this.editBox.getLineCount() * 9;
@@ -415,18 +413,18 @@ public class EditorComponent extends BaseComponent {
             
             double d = mouseX - gutterWidth - 4 + this.scrollX;
             double e = mouseY - 4 + this.scrollY;
-            this.editBox.setSelecting(Screen.hasShiftDown());
+            this.editBox.setSelecting(GLFW.glfwGetKey(MinecraftClient.getInstance().getWindow().getHandle(), GLFW.GLFW_KEY_LEFT_SHIFT) == GLFW.GLFW_PRESS || GLFW.glfwGetKey(MinecraftClient.getInstance().getWindow().getHandle(), GLFW.GLFW_KEY_RIGHT_SHIFT) == GLFW.GLFW_PRESS);
             this.editBox.moveCursor(d, e);
             return true;
         }
-        return super.onMouseDown(mouseX, mouseY, button);
+        return super.onMouseDown(click, doubled);
     }
 
     @Override
-    public boolean onMouseDrag(double mouseX, double mouseY, double deltaX, double deltaY, int button) {
-        this.mouseX = mouseX;
-        this.mouseY = mouseY;
-        if (button == 0) {
+    public boolean onMouseDrag(Click click, double deltaX, double deltaY) {
+        this.mouseX = click.x();
+        this.mouseY = click.y();
+        if (click.button() == 0) {
             if (draggingVertical) {
                 int totalHeight = this.editBox.getLineCount() * 9 + 8;
                 int barHeight = Math.max(10, (int) ((float) this.height * this.height / totalHeight));
@@ -464,26 +462,36 @@ public class EditorComponent extends BaseComponent {
             double e = mouseY - 4 + this.scrollY;
             this.editBox.setSelecting(true);
             this.editBox.moveCursor(d, e);
-            this.editBox.setSelecting(Screen.hasShiftDown());
+            this.editBox.setSelecting(GLFW.glfwGetKey(MinecraftClient.getInstance().getWindow().getHandle(), GLFW.GLFW_KEY_LEFT_SHIFT) == GLFW.GLFW_PRESS || GLFW.glfwGetKey(MinecraftClient.getInstance().getWindow().getHandle(), GLFW.GLFW_KEY_RIGHT_SHIFT) == GLFW.GLFW_PRESS);
             return true;
         }
-        return super.onMouseDrag(mouseX, mouseY, deltaX, deltaY, button);
+        return super.onMouseDrag(click, deltaX, deltaY);
     }
 
     @Override
-    public boolean onMouseUp(double mouseX, double mouseY, int button) {
-        this.mouseX = mouseX;
-        this.mouseY = mouseY;
+    public boolean onMouseUp(Click click) {
+        this.mouseX = click.x();
+        this.mouseY = click.y();
         draggingVertical = false;
         draggingHorizontal = false;
-        return super.onMouseUp(mouseX, mouseY, button);
+        return super.onMouseUp(click);
     }
 
     @Override
     public boolean onMouseScroll(double mouseX, double mouseY, double amount) {
         this.mouseX = mouseX;
         this.mouseY = mouseY;
-        if (Screen.hasShiftDown()) {
+
+        boolean shift = GLFW.glfwGetKey(
+                MinecraftClient.getInstance().getWindow().getHandle(),
+                GLFW.GLFW_KEY_LEFT_SHIFT
+        ) == GLFW.GLFW_PRESS
+                || GLFW.glfwGetKey(
+                MinecraftClient.getInstance().getWindow().getHandle(),
+                GLFW.GLFW_KEY_RIGHT_SHIFT
+        ) == GLFW.GLFW_PRESS;
+
+        if (shift) {
             scrollX = Math.max(0, scrollX - amount * 15);
             int maxScrollX = getMaxScrollX();
             if (scrollX > maxScrollX) scrollX = maxScrollX;
@@ -496,21 +504,25 @@ public class EditorComponent extends BaseComponent {
     }
 
     @Override
-    public boolean onKeyPress(int keyCode, int scanCode, int modifiers) {
+    public boolean onKeyPress(KeyInput input) {
         if (!this.focused) return false;
 
-        if (Screen.hasControlDown()) {
-            if (keyCode == GLFW.GLFW_KEY_Z) {
+        boolean shift = (input.modifiers() & GLFW.GLFW_MOD_SHIFT) != 0;
+        boolean ctrl = (input.modifiers() & GLFW.GLFW_MOD_CONTROL) != 0;
+        boolean alt = (input.modifiers() & GLFW.GLFW_MOD_ALT) != 0;
+
+        if (ctrl) {
+            if (input.getKeycode() == GLFW.GLFW_KEY_Z) {
                 undo();
                 return true;
             }
 
-            if (keyCode == GLFW.GLFW_KEY_Y) {
+            if (input.getKeycode() == GLFW.GLFW_KEY_Y) {
                 redo();
                 return true;
             }
 
-            if (Screen.hasShiftDown() && keyCode == GLFW.GLFW_KEY_K) {
+            if (shift && input.getKeycode() == GLFW.GLFW_KEY_K) {
 
                 int lineIndex = editBox.getCurrentLineIndex();
                 CommandEditBox.Substring line = editBox.getLine(lineIndex);
@@ -545,9 +557,9 @@ public class EditorComponent extends BaseComponent {
             }
         }
 
-        if (Screen.hasAltDown()) {
+        if (alt) {
 
-            if (Screen.hasShiftDown() && keyCode == GLFW.GLFW_KEY_DOWN) {
+            if (shift && input.getKeycode() == GLFW.GLFW_KEY_DOWN) {
                 int line = editBox.getCurrentLineIndex();
                 List<String> lines = new ArrayList<>(List.of(editBox.getText().split("\n", -1)));
                 CommandEditBox.Substring current = editBox.getLine(line);
@@ -565,7 +577,7 @@ public class EditorComponent extends BaseComponent {
                 return true;
             }
 
-            if (keyCode == GLFW.GLFW_KEY_UP) {
+            if (input.getKeycode() == GLFW.GLFW_KEY_UP) {
                 int line = editBox.getCurrentLineIndex();
                 List<String> lines = new ArrayList<>(List.of(editBox.getText().split("\n", -1)));
                 if (line == 0) return true;
@@ -581,7 +593,7 @@ public class EditorComponent extends BaseComponent {
                 );
                 saveHistory();
                 return true;
-            } else if (keyCode == GLFW.GLFW_KEY_DOWN) {
+            } else if (input.getKeycode() == GLFW.GLFW_KEY_DOWN) {
                 int line = editBox.getCurrentLineIndex();
                 List<String> lines = new ArrayList<>(List.of(editBox.getText().split("\n", -1)));
                 if (line >= lines.size() - 1) return true;
@@ -601,39 +613,39 @@ public class EditorComponent extends BaseComponent {
         }
 
         if (suggestions != null && !suggestions.isEmpty()) {
-            if (keyCode == GLFW.GLFW_KEY_UP) {
+            if (input.getKeycode() == GLFW.GLFW_KEY_UP) {
                 selectedSuggestion = (selectedSuggestion - 1 + suggestions.getList().size()) % suggestions.getList().size();
                 cyclingSuggestions = false;
                 return true;
             }
-            if (keyCode == GLFW.GLFW_KEY_DOWN) {
+            if (input.getKeycode() == GLFW.GLFW_KEY_DOWN) {
                 selectedSuggestion = (selectedSuggestion + 1) % suggestions.getList().size();
                 cyclingSuggestions = false;
                 return true;
             }
-            if (keyCode == GLFW.GLFW_KEY_TAB) {
-                applySuggestion(Screen.hasShiftDown() ? -1 : 1);
+            if (input.getKeycode() == GLFW.GLFW_KEY_TAB) {
+                applySuggestion(shift ? -1 : 1);
                 return true;
             }
-            if (keyCode == GLFW.GLFW_KEY_ENTER || keyCode == GLFW.GLFW_KEY_KP_ENTER) {
+            if (input.getKeycode() == GLFW.GLFW_KEY_ENTER || input.getKeycode() == GLFW.GLFW_KEY_KP_ENTER) {
                 applySuggestion(0);
                 return true;
             }
-            if (keyCode == GLFW.GLFW_KEY_ESCAPE) {
+            if (input.getKeycode() == GLFW.GLFW_KEY_ESCAPE) {
                 suggestions = null;
                 cyclingSuggestions = false;
                 return true;
             }
-        } else if (keyCode == GLFW.GLFW_KEY_TAB) {
+        } else if (input.getKeycode() == GLFW.GLFW_KEY_TAB) {
             updateSuggestions();
             return true;
         }
 
-        if (this.editBox.handleSpecialKey(keyCode)) {
-            if (keyCode == GLFW.GLFW_KEY_BACKSPACE
-                    || keyCode == GLFW.GLFW_KEY_DELETE
-                    || keyCode == GLFW.GLFW_KEY_ENTER
-                    || keyCode == GLFW.GLFW_KEY_KP_ENTER) {
+        if (this.editBox.handleSpecialKey(input.getKeycode(), input.modifiers())) {
+            if (input.getKeycode() == GLFW.GLFW_KEY_BACKSPACE
+                    || input.getKeycode() == GLFW.GLFW_KEY_DELETE
+                    || input.getKeycode() == GLFW.GLFW_KEY_ENTER
+                    || input.getKeycode() == GLFW.GLFW_KEY_KP_ENTER) {
                 saveHistory();
             }
 
@@ -641,29 +653,29 @@ public class EditorComponent extends BaseComponent {
             return true;
         }
 
-        return super.onKeyPress(keyCode, scanCode, modifiers);
+        return super.onKeyPress(input);
     }
 
     @Override
-    public boolean onCharTyped(char chr, int modifiers) {
+    public boolean onCharTyped(CharInput input) {
         if (!this.focused) return false;
-        if (net.minecraft.util.StringHelper.isValidChar(chr)) {
+        if (input.isValidChar()) {
             cyclingSuggestions = false;
 
-            if (chr == ')' || chr == ']' || chr == '}' ||
-                    chr == '"' || chr == '\'' || chr == '`') {
+            if (input.codepoint() == ')' || input.codepoint() == ']' || input.codepoint() == '}' ||
+                    input.codepoint() == '"' || input.codepoint() == '\'' || input.codepoint() == '`') {
 
                 int cursor = editBox.getCursor();
                 String text = editBox.getText();
 
-                if (cursor < text.length() && text.charAt(cursor) == chr) {
+                if (cursor < text.length() && text.charAt(cursor) == input.codepoint()) {
                     editBox.setSelecting(false);
                     editBox.moveCursor(CursorMovement.RELATIVE, 1);
                     return true;
                 }
             }
 
-            switch (chr) {
+            switch (input.codepoint()) {
                 case '(' -> insertPair("()");
                 case '[' -> insertPair("[]");
                 case '{' -> insertPair("{}");
@@ -671,7 +683,7 @@ public class EditorComponent extends BaseComponent {
                 case '\'' -> insertPair("''");
                 case '`' -> insertPair("``");
                 default -> {
-                    editBox.replaceSelection(Character.toString(chr));
+                    editBox.replaceSelection(Character.toString(input.codepoint()));
                     saveHistory();
                 }
             }
@@ -753,15 +765,13 @@ public class EditorComponent extends BaseComponent {
         int gutterWidth = getGutterWidth();
         int availableWidth = this.width - gutterWidth - 10;
         if (maxWidth > availableWidth) {
-            if (mouseY >= this.height - scrollbarSize && mouseY <= this.height && mouseX >= gutterWidth && mouseX <= this.width) {
-                return true;
-            }
+            return mouseY >= this.height - scrollbarSize && mouseY <= this.height && mouseX >= gutterWidth && mouseX <= this.width;
         }
 
         return false;
     }
 
-    public void drawSuggestions(OwoUIDrawContext context) {
+    public void drawSuggestions(OwoUIGraphics context) {
         if (suggestions == null || suggestions.isEmpty()) return;
 
         List<Suggestion> list = suggestions.getList();
@@ -794,8 +804,8 @@ public class EditorComponent extends BaseComponent {
             y = suggestionY;
         }
 
-        context.getMatrices().push();
-        context.getMatrices().translate(0, 0, 500);
+        context.getMatrices().pushMatrix();
+        context.getMatrices().translate(0, 0);
 
         context.fill(x - 1, y - 1, x + maxWidth + 1, y + visibleCount * rowHeight + 1, 0xFF404040);
         context.fill(x, y, x + maxWidth, y + visibleCount * rowHeight, 0xFF101010);
@@ -812,7 +822,7 @@ public class EditorComponent extends BaseComponent {
             context.drawText(this.textRenderer, Text.literal(suggestion.getText()), x + 5, itemY + 2, 0xFFFFFFFF, true);
         }
 
-        context.getMatrices().pop();
+        context.getMatrices().popMatrix();
     }
 
     private void updateSuggestions() {
@@ -854,7 +864,7 @@ public class EditorComponent extends BaseComponent {
 
         StringReader reader = new StringReader(toParse);
 
-        ParseResults<CommandSource> parse = networkHandler.getCommandDispatcher().parse(reader, networkHandler.getCommandSource());
+        ParseResults<ClientCommandSource> parse = networkHandler.getCommandDispatcher().parse(reader, networkHandler.getCommandSource());
 
         if (pendingSuggestions != null) {
             pendingSuggestions.cancel(true);
@@ -893,8 +903,7 @@ public class EditorComponent extends BaseComponent {
         sb.append(toParse.substring(last));
         toParse = sb.toString();
 
-        StringReader reader = new StringReader(toParse);
-        return reader;
+        return new StringReader(toParse);
     }
 
     private static @NotNull StringReader getStringReader(String commandPart) {
@@ -1002,7 +1011,7 @@ public class EditorComponent extends BaseComponent {
         }
 
         while (history.size() > historyIndex + 1) {
-            history.remove(history.size() - 1);
+            history.removeLast();
         }
 
         history.add(state);

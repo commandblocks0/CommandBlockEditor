@@ -10,6 +10,7 @@ import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.minecraft.block.CommandBlock;
 import net.minecraft.client.option.KeyBinding;
 import net.minecraft.client.util.InputUtil;
+import net.minecraft.util.Identifier;
 import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.util.math.BlockPos;
 
@@ -27,7 +28,7 @@ public class CommandblockeditorClient implements ClientModInitializer {
                                 "key.commandblockeditor.open_editor",
                                 InputUtil.Type.KEYSYM,
                                 KEY_EQUAL,
-                                "category.commandblockeditor.keys"
+                                KeyBinding.Category.create(Identifier.of("category.commandblockeditor.keys"))
                         )
                 );
 
