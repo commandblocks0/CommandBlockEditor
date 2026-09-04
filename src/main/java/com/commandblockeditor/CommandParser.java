@@ -150,6 +150,30 @@ public final class CommandParser {
         return editor;
     }
 
+    public static List<String> expandEditorLine(String editorLine) {
+        Matcher matcher = PREFIX_PATTERN.matcher(editorLine);
+        if (!matcher.matches()) {
+            return List.of(editorLine);
+        }
+
+        String prefix = matcher.group(1);
+        int repeat = getRepeat(prefix);
+        if (repeat <= 1) {
+            return List.of(editorLine);
+        }
+
+        String flags = prefix.replaceAll("[\\d\\s]", "");
+        String command = matcher.group(2).stripLeading();
+        List<String> lines = new ArrayList<>();
+
+        for (int i = 0; i < repeat; i++) {
+            String expanded = replaceExpressions(command, i);
+            lines.add(flags.isEmpty() ? expanded : flags + ": " + expanded);
+        }
+
+        return lines;
+    }
+
     private static List<String> expand(List<String> editor) {
         List<String> lines = new ArrayList<>();
 
