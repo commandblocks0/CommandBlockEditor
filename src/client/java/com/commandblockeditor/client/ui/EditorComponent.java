@@ -1,5 +1,6 @@
 package com.commandblockeditor.client.ui;
 
+import com.commandblockeditor.CommandParser;
 import com.commandblockeditor.client.mixin.ChatInputSuggestorAccessor;
 import com.mojang.brigadier.ParseResults;
 import com.mojang.brigadier.StringReader;
@@ -510,6 +511,13 @@ public class EditorComponent extends BaseComponent {
                 return true;
             }
 
+            if (keyCode == GLFW.GLFW_KEY_U) {
+                if (ungroupCurrentLine()) {
+                    saveHistory();
+                }
+                return true;
+            }
+
             if (Screen.hasShiftDown() && keyCode == GLFW.GLFW_KEY_K) {
 
                 int lineIndex = editBox.getCurrentLineIndex();
@@ -642,6 +650,33 @@ public class EditorComponent extends BaseComponent {
         }
 
         return super.onKeyPress(keyCode, scanCode, modifiers);
+    }
+
+    private boolean ungroupCurrentLine() {
+        int lineIndex = editBox.getCurrentLineIndex();
+        CommandEditBox.Substring line = editBox.getLine(lineIndex);
+        String text = editBox.getText();
+        String lineText = text.substring(line.beginIndex(), line.endIndex());
+        List<String> expandedLines = CommandParser.expandEditorLine(lineText);
+
+        if (expandedLines.size() <= 1) {
+            return false;
+        }
+
+        int column = editBox.getCursor() - line.beginIndex();
+        String replacement = String.join("\n", expandedLines);
+        String newText = text.substring(0, line.beginIndex()) + replacement + text.substring(line.endIndex());
+
+        editBox.setText(newText);
+        editBox.setSelecting(false);
+        editBox.moveCursor(
+                CursorMovement.ABSOLUTE,
+                line.beginIndex() + Math.min(column, expandedLines.getFirst().length())
+        );
+        cyclingSuggestions = false;
+        suggestions = null;
+
+        return true;
     }
 
     @Override
