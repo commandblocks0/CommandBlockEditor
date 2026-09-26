@@ -57,10 +57,66 @@ public final class CommandParser {
         return commands;
     }
 
+    private static List<ParsedCommand> fillMissingNumbers(List<ParsedCommand> commands) {
+        if (commands.isEmpty()) return commands;
+        List<ParsedCommand> result = new ArrayList<>();
+        int i = 0;
+        while (i < commands.size()) {
+            String base = normalize(commands.get(i).command());
+            List<ParsedCommand> group = new ArrayList<>();
+            while (i < commands.size() && normalize(commands.get(i).command()).equals(base)) {
+                group.add(commands.get(i));
+                i++;
+            }
+            if (group.size() > 1) {
+                result.addAll(fillGroup(group));
+            } else {
+                result.addAll(group);
+            }
+        }
+        return result;
+    }
+
+    private static List<ParsedCommand> fillGroup(List<ParsedCommand> group) {
+        List<List<String>> sequences = new ArrayList<>();
+        for (ParsedCommand cmd : group) {
+            sequences.add(splitIntoTokens(cmd.command()));
+        }
+        int maxLen = 0;
+        for (List<String> s : sequences) maxLen = Math.max(maxLen, s.size());
+        for (List<String> s : sequences) {
+            while (s.size() < maxLen) s.add("~");
+        }
+        boolean[] hasNumber = new boolean[maxLen];
+        for (List<String> s : sequences) {
+            for (int j = 0; j < s.size(); j++) {
+                if (NUMBER_PATTERN.matcher(s.get(j)).find()) {
+                    hasNumber[j] = true;
+                }
+            }
+        }
+        List<ParsedCommand> result = new ArrayList<>();
+        for (int k = 0; k < group.size(); k++) {
+            List<String> seq = new ArrayList<>(sequences.get(k));
+            for (int j = 0; j < seq.size(); j++) {
+                if (hasNumber[j] && !NUMBER_PATTERN.matcher(seq.get(j)).find()) {
+                    seq.set(j, seq.get(j) + "0");
+                }
+            }
+            result.add(new ParsedCommand(group.get(k).type(), group.get(k).conditional(), group.get(k).auto(), String.join(" ", seq)));
+        }
+        return result;
+    }
+
+    private static List<String> splitIntoTokens(String command) {
+        return java.util.Arrays.asList(command.split(" "));
+    }
+
     public static List<String> toEditor(List<ParsedCommand> commands) {
+        List<ParsedCommand> filled = fillMissingNumbers(commands);
         List<Group> groups = new ArrayList<>();
         Group current = null;
-        for (ParsedCommand command : commands) {
+        for (ParsedCommand command : filled) {
             List<Double> numbers = getNumbers(command.command());
 
             boolean first = current != null
